@@ -55,11 +55,13 @@ macro_rules! png {
 static GAMEPAD: LazyLock<ksni::Icon> = png!(include_bytes!("../assets/gamepad.png"), Style::Color);
 static GAMEPAD_STEAM: LazyLock<ksni::Icon> =
     png!(include_bytes!("../assets/gamepad.png"), Style::Steam);
-static GAMEPAD_DIM: LazyLock<ksni::Icon> = png!(include_bytes!("../assets/gamepad.png"), Style::Dim);
+static GAMEPAD_DIM: LazyLock<ksni::Icon> =
+    png!(include_bytes!("../assets/gamepad.png"), Style::Dim);
 static DESKTOP: LazyLock<ksni::Icon> = png!(include_bytes!("../assets/desktop.png"), Style::Color);
 static DESKTOP_STEAM: LazyLock<ksni::Icon> =
     png!(include_bytes!("../assets/desktop.png"), Style::Steam);
-static DESKTOP_DIM: LazyLock<ksni::Icon> = png!(include_bytes!("../assets/desktop.png"), Style::Dim);
+static DESKTOP_DIM: LazyLock<ksni::Icon> =
+    png!(include_bytes!("../assets/desktop.png"), Style::Dim);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
