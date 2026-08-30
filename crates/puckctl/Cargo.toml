@@ -10,6 +10,7 @@ description = "Gamepad / desktop mode daemon and CLI for the Steam Controller Pu
 
 [dependencies]
 puckctl-protocol = { path = "../puckctl-protocol" }
+libc = "0.2"
 
 [lints]
 workspace = true

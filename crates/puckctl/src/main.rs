@@ -1,42 +1,45 @@
-use puckctl_protocol::VERSION;
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::collapsible_if,
+    clippy::format_collect,
+    clippy::map_unwrap_or,
+    clippy::needless_pass_by_value,
+    clippy::redundant_closure_for_method_calls,
+    clippy::single_match,
+    clippy::single_match_else,
+    clippy::struct_excessive_bools,
+    clippy::too_many_lines,
+    clippy::unchecked_time_subtraction,
+    clippy::unnecessary_wraps,
+    clippy::unreadable_literal,
+    unsafe_code
+)]
 
-fn usage(out: &mut impl std::io::Write) -> std::io::Result<()> {
-    writeln!(
-        out,
-        "\
-usage: puckctl [command]
-
-Gamepad / desktop mode tool for the Steam Controller Puck.
-Daemon and CLI are not wired up yet.
-
-commands (planned):
-  gamepad    virtual Xbox 360 pad
-  lizard     firmware keyboard/mouse
-  toggle
-  override on|off|toggle
-  status
-  quit
-
-  -h, --help       this text
-  -V, --version    print version and exit"
-    )
-}
+mod cli;
+mod combo;
+mod control;
+mod daemon;
+mod grab;
+mod hid;
+mod hw;
+mod linux;
+mod log;
+mod mode;
+mod pad;
+mod paths;
+mod poll;
+mod scan;
+mod slot;
+mod steam;
+mod steam_cfg;
+mod sys;
+#[cfg(test)]
+mod test_env;
+mod urb;
+mod usb;
 
 fn main() {
-    match std::env::args().nth(1).as_deref() {
-        Some("-h" | "--help") => {
-            let _ = usage(&mut std::io::stdout());
-        }
-        Some("-V" | "--version") => {
-            println!("puckctl {VERSION}");
-        }
-        Some(other) => {
-            eprintln!("puckctl: {other}: not implemented yet");
-            std::process::exit(2);
-        }
-        None => {
-            eprintln!("puckctl: daemon not implemented yet (try --help)");
-            std::process::exit(2);
-        }
-    }
+    cli::main();
 }

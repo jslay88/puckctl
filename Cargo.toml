@@ -11,7 +11,7 @@ repository = "https://github.com/jslay88/puckctl"
 rust-version = "1.98"
 
 [workspace.lints.rust]
-unsafe_code = "deny"
+unsafe_code = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

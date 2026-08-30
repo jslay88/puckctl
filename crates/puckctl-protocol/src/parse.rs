@@ -2,9 +2,9 @@ use crate::{
     BTN_A, BTN_B, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT, BTN_DPAD_UP, BTN_L, BTN_L3, BTN_L4,
     BTN_L5, BTN_MENU, BTN_QAM, BTN_R, BTN_R3, BTN_R4, BTN_R5, BTN_STEAM, BTN_VIEW, BTN_X, BTN_Y,
     ID_BATTERY_STATUS, ID_CONTROLLER_STATE, ID_CONTROLLER_STATE_BLE, ID_CONTROLLER_STATE_TIMESTAMP,
-    ID_WIRELESS_STATUS, ID_WIRELESS_STATUS_X, OFF_BUTTONS, OFF_LSTICK_X, OFF_LSTICK_Y,
-    OFF_RSTICK_X, OFF_RSTICK_Y, OFF_TRIG_L, OFF_TRIG_R, STATE_MIN_LEN, WIRELESS_CONNECT,
-    WIRELESS_DISCONNECT,
+    ID_WIRELESS_STATUS, ID_WIRELESS_STATUS_X, OFF_BUTTONS, OFF_IMU_ACCEL, OFF_IMU_GYRO,
+    OFF_LSTICK_X, OFF_LSTICK_Y, OFF_RSTICK_X, OFF_RSTICK_Y, OFF_TRIG_L, OFF_TRIG_R, STATE_IMU_LEN,
+    STATE_MIN_LEN, WIRELESS_CONNECT, WIRELESS_DISCONNECT,
 };
 
 /// Linux evdev key codes (`linux/input-event-codes.h`). Kept here so parse
@@ -110,6 +110,9 @@ pub struct ControllerState {
     pub left_trigger: i32,
     pub right_trigger: i32,
     pub hat: (i32, i32),
+    /// SDL hidapi order: X, Z, -Y. `None` if the report is too short.
+    pub accel: Option<(i32, i32, i32)>,
+    pub gyro: Option<(i32, i32, i32)>,
 }
 
 impl ControllerState {
@@ -153,6 +156,29 @@ fn trigger_to_x360(v: i16) -> i32 {
     i32::from(v.max(0)) >> 7
 }
 
+/// SDL `hidapi_steam_triton` emits X, Z, -Y for both accel and gyro.
+fn sdl_imu_axes(x: i16, y: i16, z: i16) -> (i32, i32, i32) {
+    (i32::from(x), i32::from(z), neg16(y))
+}
+
+fn parse_imu(data: &[u8]) -> Option<[(i32, i32, i32); 2]> {
+    if data.len() < STATE_IMU_LEN {
+        return None;
+    }
+    Some([
+        sdl_imu_axes(
+            rd16(data, OFF_IMU_ACCEL),
+            rd16(data, OFF_IMU_ACCEL + 2),
+            rd16(data, OFF_IMU_ACCEL + 4),
+        ),
+        sdl_imu_axes(
+            rd16(data, OFF_IMU_GYRO),
+            rd16(data, OFF_IMU_GYRO + 2),
+            rd16(data, OFF_IMU_GYRO + 4),
+        ),
+    ])
+}
+
 #[must_use]
 pub fn parse_state(data: &[u8]) -> Option<ControllerState> {
     if data.len() < STATE_MIN_LEN {
@@ -173,6 +199,7 @@ pub fn parse_state(data: &[u8]) -> Option<ControllerState> {
     } else {
         0
     };
+    let imu = parse_imu(data);
     Some(ControllerState {
         buttons,
         left_stick: (
@@ -186,6 +213,8 @@ pub fn parse_state(data: &[u8]) -> Option<ControllerState> {
         left_trigger: trigger_to_x360(rd16(data, OFF_TRIG_L)),
         right_trigger: trigger_to_x360(rd16(data, OFF_TRIG_R)),
         hat: (hat_x, hat_y),
+        accel: imu.map(|v| v[0]),
+        gyro: imu.map(|v| v[1]),
     })
 }
 
@@ -279,12 +308,43 @@ mod tests {
             Some(Report::Wireless(WirelessStatus::Disconnect))
         );
         assert_eq!(
+            classify(&[ID_WIRELESS_STATUS, 9]),
+            Some(Report::Wireless(WirelessStatus::Unknown(9)))
+        );
+        assert_eq!(
             classify(&[ID_BATTERY_STATUS, 1, 80]),
             Some(Report::Battery {
                 charge_state: 1,
                 level_pct: 80
             })
         );
+        assert!(classify(&[ID_BATTERY_STATUS, 1]).is_none());
+        assert!(classify(&[]).is_none());
+        assert!(classify(&[0x00]).is_none());
+        assert!(classify(&[ID_WIRELESS_STATUS]).is_none());
+        let mut ble = state_report(0, 0, 0, 0, 0, 0, 0);
+        ble[0] = ID_CONTROLLER_STATE_BLE;
+        assert!(matches!(classify(&ble), Some(Report::State(_))));
+        ble[0] = ID_CONTROLLER_STATE_TIMESTAMP;
+        assert!(matches!(classify(&ble), Some(Report::State(_))));
+    }
+
+    #[test]
+    fn dpad_left_and_down() {
+        let d = state_report(BTN_DPAD_LEFT | BTN_DPAD_DOWN, 0, 0, 0, 0, 0, 0);
+        let s = parse_state(&d).expect("state");
+        assert_eq!(s.hat, (-1, 1));
+    }
+
+    #[test]
+    fn imu_uses_sdl_axis_swap() {
+        let mut d = vec![0_u8; STATE_IMU_LEN];
+        d[0] = ID_CONTROLLER_STATE;
+        d[OFF_IMU_ACCEL..OFF_IMU_ACCEL + 6].copy_from_slice(&[10, 0, 20, 0, 30, 0]);
+        d[OFF_IMU_GYRO..OFF_IMU_GYRO + 6].copy_from_slice(&[40, 0, 50, 0, 60, 0]);
+        let s = parse_state(&d).expect("state");
+        assert_eq!(s.accel, Some((10, 30, -20)));
+        assert_eq!(s.gyro, Some((40, 60, -50)));
     }
 
     #[test]

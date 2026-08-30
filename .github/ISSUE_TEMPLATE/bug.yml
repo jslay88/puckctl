@@ -1,0 +1,44 @@
+name: Bug
+description: Something is broken
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: First sentence is the bug. Then paste evidence (journalctl, puckctl status, dmesg).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: puckctl version
+      placeholder: puckctl -V
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / desktop
+      placeholder: CachyOS, KDE Plasma 6
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Controller / dongle
+      placeholder: Proteus 28de:1304
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: puckctl status
+      render: text
+  - type: checkboxes
+    id: steam
+    attributes:
+      label: Steam
+      options:
+        - label: Steam was running
+        - label: Override Steam was on

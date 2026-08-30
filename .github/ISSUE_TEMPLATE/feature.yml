@@ -1,0 +1,15 @@
+name: Feature
+description: Ask for a behavior change
+labels: [enhancement]
+body:
+  - type: textarea
+    id: ask
+    attributes:
+      label: What do you want
+      description: Concrete behavior, not a vibe. Why it helps on a Puck / desktop.
+    validations:
+      required: true
+  - type: textarea
+    id: now
+    attributes:
+      label: What happens today

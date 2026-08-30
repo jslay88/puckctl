@@ -10,6 +10,10 @@ description = "StatusNotifier tray for puckctl (KDE, GNOME with AppIndicator, an
 
 [dependencies]
 puckctl-protocol = { path = "../puckctl-protocol" }
+gtk4 = "0.11"
+image = { version = "0.25", default-features = false, features = ["png"] }
+ksni = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

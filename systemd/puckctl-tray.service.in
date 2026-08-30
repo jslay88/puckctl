@@ -1,0 +1,14 @@
+[Unit]
+Description=puckctl tray (mode switch)
+Documentation=https://github.com/jslay88/puckctl
+After=graphical-session.target puckctl.service
+Wants=puckctl.service
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/puckctl-tray
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

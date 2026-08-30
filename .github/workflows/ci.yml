@@ -12,19 +12,51 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  GTK_A11Y: none
 
 jobs:
   test:
-    name: test
-    runs-on: ubuntu-latest
+    name: lint and test
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: GTK + Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgtk-4-dev dbus-x11
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: test
-        run: cargo test --workspace
+      - name: test + coverage
+        run: xvfb-run -a --server-args="-screen 0 1280x720x24" cargo llvm-cov --workspace --all-targets --fail-under-lines 80 --summary-only -- --test-threads=1
+
+  build:
+    name: release compile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: Swatinem/rust-cache@v2
+      - name: GTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev pkg-config
+      - name: cargo build --release
+        run: cargo build --release --workspace
+      - name: pack
+        run: sh scripts/pack-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: puckctl-x86_64-linux
+          path: |
+            dist/puckctl-*-linux.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error

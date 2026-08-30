@@ -1,4 +1,10 @@
 /target
+/dist
+/puckctl
+/puckctl-tray
+systemd/puckctl.service
+systemd/puckctl-tray.service
+.bindir-stamp
 **/*.rs.bk
 .idea/
 .vscode/
