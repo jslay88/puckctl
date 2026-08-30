@@ -1,0 +1,15 @@
+[package]
+name = "puckctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Gamepad / desktop mode daemon and CLI for the Steam Controller Puck"
+
+[dependencies]
+puckctl-protocol = { path = "../puckctl-protocol" }
+
+[lints]
+workspace = true

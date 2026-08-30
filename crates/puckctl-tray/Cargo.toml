@@ -1,0 +1,15 @@
+[package]
+name = "puckctl-tray"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "StatusNotifier tray for puckctl (KDE, GNOME with AppIndicator, and other SNI desktops)"
+
+[dependencies]
+puckctl-protocol = { path = "../puckctl-protocol" }
+
+[lints]
+workspace = true
