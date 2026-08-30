@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: main
       - name: stamp pkgver
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
