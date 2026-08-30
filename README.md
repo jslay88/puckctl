@@ -26,6 +26,9 @@ Linux, x86_64, a user systemd session, and GTK 4 at runtime (the tray).
 KDE works as-is. GNOME needs an AppIndicator extension. More in
 [docs/install.md](docs/install.md).
 
+Arch / CachyOS: `yay -S puckctl` once the [AUR package](https://aur.archlinux.org/packages/puckctl)
+is up (CI publishes it on each GitHub Release).
+
 **Release binary** (no Rust toolchain):
 
 ```sh

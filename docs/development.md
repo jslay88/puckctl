@@ -69,6 +69,32 @@ make dist
 # or: sh scripts/pack-release.sh
 ```
 
+## AUR
+
+`aur/PKGBUILD` is the Arch package. The [AUR workflow](../.github/workflows/aur.yml)
+pushes it to [aur.archlinux.org/puckctl](https://aur.archlinux.org/packages/puckctl)
+when a GitHub Release is published (and via workflow_dispatch for a tag).
+
+One-time setup:
+
+1. Register at https://aur.archlinux.org/account/register/
+2. Make a deploy key (do not reuse your laptop key):
+
+   ```sh
+   ssh-keygen -t ed25519 -f aur-puckctl -C "github-actions puckctl" -N ""
+   ```
+
+3. Paste `aur-puckctl.pub` into the AUR account SSH keys page.
+4. Repo Settings → Secrets and variables → Actions → `AUR_SSH_PRIVATE_KEY`
+   = the private key file (including `BEGIN` / `END` lines).
+
+Until that secret exists, the AUR job is skipped. After it is set, run
+**Actions → AUR → Run workflow** with tag `v0.1.0` to publish the current
+release, or cut the next tag and it will publish on its own.
+
+`RUSTUP_TOOLCHAIN=stable` in the PKGBUILD so `makepkg` uses distro rust
+instead of the repo `rust-toolchain.toml` pin.
+
 ## File size
 
 Keep new modules near 300 lines. Over that is fine when the file is still

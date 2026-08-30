@@ -1,9 +1,14 @@
 # Install
 
 puckctl is a user-session daemon plus a StatusNotifier tray. No system
-service. Prebuilt x86_64 Linux binaries come from GitHub Releases. There
-is no distro package yet (an AUR `puckctl` is the natural next step on
-Arch/CachyOS).
+service. Prebuilt x86_64 Linux binaries come from GitHub Releases.
+
+On Arch / CachyOS, after the AUR package is published:
+
+```sh
+yay -S puckctl
+# or: paru -S puckctl
+```
 
 ## Requirements
 

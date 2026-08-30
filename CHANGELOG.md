@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CI publishes `puckctl` to the AUR on each GitHub Release
+
 ## 0.1.0 - 2026-08-30
 
 - Daemon and CLI (`puckctl`): gamepad or firmware desktop (lizard), Steam

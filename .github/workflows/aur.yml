@@ -1,0 +1,44 @@
+name: AUR
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to publish (v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  aur:
+    name: publish
+    if: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: stamp pkgver
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          ver="${TAG#v}"
+          sed -i "s/^pkgver=.*/pkgver=${ver}/" aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/PKGBUILD
+          cp aur/PKGBUILD aur/puckctl.install .
+      - name: publish
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: puckctl
+          pkgbuild: ./PKGBUILD
+          assets: puckctl.install
+          updpkgsums: "true"
+          commit_username: jslay88
+          commit_email: justin.slay@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: ${{ github.event.release.tag_name || inputs.tag }}
+          ssh_keyscan_types: rsa,ecdsa,ed25519
