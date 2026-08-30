@@ -127,20 +127,22 @@ pub fn scan_devices(
     usb: &mut Option<UsbDevice>,
 ) -> Vec<Slot> {
     usb::usbfs_release(usb);
-    if override_steam && requested == Mode::Gamepad {
-        match usb::scan_devices_usbfs() {
-            Ok((slots, claimed)) if !slots.is_empty() => {
-                *usb = claimed;
-                return slots;
-            }
-            Ok(_) => logln("Steam override: usbfs claim failed, falling back to hidraw"),
-            Err(err) => logln(format!("Steam override: usbfs claim failed: {err}")),
-        }
-    }
-
     let mut slots = scan_devices_hidraw();
     if slots.is_empty() && requested == Mode::Lizard && usb::restore_hid_drivers() {
         slots = scan_devices_hidraw();
+    }
+    // Gamepad gyro is SDL hidapi on the real hidraw node. Only steal USB if
+    // hidraw is gone (Steam already unbound it) so buttons still work.
+    if slots.is_empty() && override_steam && requested == Mode::Gamepad {
+        match usb::scan_devices_usbfs() {
+            Ok((claimed_slots, claimed)) if !claimed_slots.is_empty() => {
+                logln("Steam override: hidraw missing, claimed USB (no hidapi gyro)");
+                *usb = claimed;
+                return claimed_slots;
+            }
+            Ok(_) => logln("Steam override: usbfs claim failed"),
+            Err(err) => logln(format!("Steam override: usbfs claim failed: {err}")),
+        }
     }
     slots
 }
@@ -210,5 +212,6 @@ HID_PHYS=usb-0000:00:14.0-1/input2
         let mut usb = None;
         let _ = scan_devices(false, Mode::Gamepad, &mut usb);
         let _ = scan_devices(false, Mode::Lizard, &mut usb);
+        let _ = scan_devices(true, Mode::Gamepad, &mut usb);
     }
 }

@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "puckctl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "puckctl-protocol",
@@ -802,11 +802,11 @@ dependencies = [
 
 [[package]]
 name = "puckctl-protocol"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "puckctl-tray"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gtk4",
  "image",

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-08-30
+
+- Gamepad mode keeps hidraw when Steam override is on, so SDL gyro still works
 - CI publishes `puckctl` to the AUR on each GitHub Release
 
 ## 0.1.0 - 2026-08-30

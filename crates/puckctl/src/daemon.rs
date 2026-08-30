@@ -164,11 +164,6 @@ impl Daemon {
             return;
         }
         if self.requested == Mode::Gamepad {
-            let claim = self.claim_from_steam();
-            if claim && (self.slots.is_empty() || !self.slots[0].transport.is_usbfs()) {
-                self.close_all();
-                self.slots = scan::scan_devices(claim, self.requested, &mut self.usb);
-            }
             self.lizard_all(false);
             grab::grab_lizard_inputs(&mut self.grabs);
             let hidraw_only = self.slots.iter().any(|slot| !slot.transport.is_usbfs());
@@ -276,16 +271,7 @@ impl Daemon {
         self.last_steam_check = Instant::now();
         self.steam_seen = steam::steam_is_running();
         if self.override_steam {
-            let want_usbfs = self.steam_seen && self.requested == Mode::Gamepad && !self.paused;
-            let have_usbfs = self.slots.first().is_some_and(|s| s.transport.is_usbfs());
-            if want_usbfs != have_usbfs && !self.slots.is_empty() {
-                if want_usbfs {
-                    logln("Steam is running — claiming USB so Steam cannot use the puck");
-                } else {
-                    logln("Steam exited — releasing USB so games can use hidraw gyro");
-                }
-                self.close_all();
-            } else if self.requested == Mode::Gamepad && !self.paused {
+            if self.requested == Mode::Gamepad && !self.paused {
                 grab::grab_lizard_inputs(&mut self.grabs);
             }
         } else if self.steam_seen && !self.paused {
@@ -404,6 +390,8 @@ mod tests {
             d.slots.push(Slot::new("h".into(), 2, Transport::Hidraw(r)));
             d.slots[0].connected = true;
             d.steam_tick();
+            assert_eq!(d.slots.len(), 1);
+            assert!(!d.slots[0].transport.is_usbfs());
             d.override_steam = false;
             d.paused = false;
             d.last_steam_check = Instant::now() - Duration::from_secs(3);

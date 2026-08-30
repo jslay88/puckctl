@@ -54,9 +54,10 @@ The icon follows the current mode (gamepad, desktop, or Steam). Click it to
 toggle gamepad and desktop. The menu sets mode, Steam override, start on
 login, and the desktop combo (hold at least two buttons for five seconds).
 
-With Override Steam on, switching desktop (keyboard/mouse) to gamepad makes
-Steam report the Steam Controller disconnected. That is expected: puckctl
-has the device. The tray stays the yellow gamepad icon.
+With Override Steam on, switching desktop (keyboard/mouse) to gamepad can
+make Steam report the Steam Controller disconnected. That is Steam losing
+its mapping, not puckctl dropping the device. Gyro still comes from hidraw.
+The tray stays the yellow gamepad icon.
 
 CLI and Steam behavior: [docs/cli.md](docs/cli.md), [docs/steam.md](docs/steam.md).
 
