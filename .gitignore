@@ -10,3 +10,4 @@ systemd/puckctl-tray.service
 .vscode/
 *.swp
 .cursor/
+*.code-workspace

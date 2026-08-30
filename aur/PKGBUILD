@@ -1,6 +1,6 @@
 # Maintainer: Justin Slay <justin.slay@gmail.com>
 pkgname=puckctl
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Gamepad / desktop mode for the Steam Controller Puck"
 arch=('x86_64')

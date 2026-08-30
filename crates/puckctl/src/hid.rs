@@ -8,7 +8,7 @@ use crate::usb::UsbDevice;
 #[derive(Debug)]
 pub enum Transport {
     Hidraw(File),
-    Usbfs { ep_in: u8 },
+    Usbfs { ep_in: u8, ep_out: u8 },
 }
 
 impl Transport {
@@ -22,6 +22,14 @@ impl Transport {
         match self {
             Self::Hidraw(file) => Some(file.as_raw_fd()),
             Self::Usbfs { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn usbfs_ep_out(&self) -> Option<u8> {
+        match self {
+            Self::Usbfs { ep_out, .. } => Some(*ep_out),
+            Self::Hidraw(_) => None,
         }
     }
 }
@@ -48,7 +56,7 @@ pub fn read_input(
 ) -> io::Result<usize> {
     match transport {
         Transport::Hidraw(file) => raw_read(file, buf),
-        Transport::Usbfs { ep_in } => {
+        Transport::Usbfs { ep_in, .. } => {
             let usb = usb.ok_or_else(|| io::Error::other("usbfs device missing"))?;
             let n = sys::usb_bulk(usb.fd.as_fd(), *ep_in, buf, 1)?;
             Ok(usize::try_from(n).unwrap_or(0))
@@ -82,9 +90,14 @@ mod tests {
         let mut feat = [0_u8; 8];
         assert!(send_feature(&hid, None, 2, &mut feat).is_err());
 
-        let usb = Transport::Usbfs { ep_in: 0x83 };
+        let usb = Transport::Usbfs {
+            ep_in: 0x83,
+            ep_out: 0x02,
+        };
         assert!(usb.is_usbfs());
         assert!(usb.hidraw_raw().is_none());
+        assert_eq!(usb.usbfs_ep_out(), Some(0x02));
+        assert!(hid.usbfs_ep_out().is_none());
         assert!(read_input(&usb, None, &mut buf).is_err());
         assert!(send_feature(&usb, None, 2, &mut feat).is_err());
     }

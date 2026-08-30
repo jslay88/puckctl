@@ -22,9 +22,10 @@ pub fn ungrab(grabs: &mut Vec<File>) {
 }
 
 pub fn grab_lizard_inputs(grabs: &mut Vec<File>) {
-    if !crate::hw::allowed() || !grabs.is_empty() {
+    if !crate::hw::allowed() {
         return;
     }
+    ungrab(grabs);
     grab_lizard_from(
         Path::new("/sys/class/input"),
         Path::new("/dev/input"),

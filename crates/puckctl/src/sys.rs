@@ -18,8 +18,10 @@ use crate::linux::{
 };
 
 const HID_SET_REPORT: u8 = 0x09;
+const HID_GET_REPORT: u8 = 0x01;
 const HID_REPORT_FEATURE: u16 = 0x03;
 const USB_HID_SET_RT: u8 = 0x21;
+const USB_HID_GET_RT: u8 = 0xA1;
 
 /// `_IOC(_IOC_READ|_IOC_WRITE, 'H', 0x06, len)` — `HIDIOCSFEATURE(len)`.
 const fn hid_ioc_sfeature(len: usize) -> libc::c_ulong {
@@ -52,6 +54,26 @@ pub fn usb_set_feature(fd: BorrowedFd<'_>, iface: u16, buf: &mut [u8]) -> io::Re
         b_request_type: USB_HID_SET_RT,
         b_request: HID_SET_REPORT,
         w_value: (HID_REPORT_FEATURE << 8) | u16::from(buf.first().copied().unwrap_or(0)),
+        w_index: iface,
+        w_length: buf.len() as u16,
+        timeout: 80,
+        data: buf.as_mut_ptr().cast(),
+    };
+    // SAFETY: `ct.data` points at `buf` for the duration of the ioctl.
+    ioctl_ret(unsafe { libc::ioctl(fd.as_raw_fd(), USBDEVFS_CONTROL, &raw mut ct) })
+}
+
+pub fn usb_get_report(
+    fd: BorrowedFd<'_>,
+    iface: u16,
+    report_type: u8,
+    report_id: u8,
+    buf: &mut [u8],
+) -> io::Result<i32> {
+    let mut ct = UsbCtrlTransfer {
+        b_request_type: USB_HID_GET_RT,
+        b_request: HID_GET_REPORT,
+        w_value: (u16::from(report_type) << 8) | u16::from(report_id),
         w_index: iface,
         w_length: buf.len() as u16,
         timeout: 80,
@@ -174,6 +196,7 @@ mod tests {
         let mut buf = [0_u8; 8];
         assert!(hid_set_feature(fd, &mut buf).is_err());
         assert!(usb_set_feature(fd, 2, &mut buf).is_err());
+        assert!(usb_get_report(fd, 2, 3, 1, &mut buf).is_err());
         assert!(usb_bulk(fd, 0x83, &mut buf, 1).is_err());
         let mut urb = UsbUrb {
             type_: 1,

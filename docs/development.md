@@ -113,6 +113,7 @@ under `#[cfg(test)]`; that is normal Rust.
 | `daemon` | Mode, combo, Steam tick, commands |
 | `poll` | Event loop |
 | `hid` / `usb` / `urb` | hidraw and usbfs I/O |
+| `uhid` | Virtual Triton hidraw while USB is claimed |
 | `pad` | Virtual Steam Controller (uinput) |
 | `grab` | Lizard keyboard/mouse evdev grab |
 | `scan` / `slot` | Device discovery |

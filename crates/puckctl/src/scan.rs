@@ -11,11 +11,12 @@ use crate::mode::Mode;
 use crate::slot::{MAX_SLOTS, Slot};
 use crate::usb::{self, UsbDevice, open_rw_nonblock};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HidInfo {
     pub vid: u16,
     pub pid: u16,
     pub iface: i32,
+    pub virtual_clone: bool,
 }
 
 #[must_use]
@@ -30,6 +31,7 @@ pub fn parse_uevent_text(text: &str) -> Option<HidInfo> {
     let mut pid = 0;
     let mut iface = -1;
     let mut have_id = false;
+    let mut virtual_clone = false;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("HID_ID=") {
             let parts: Vec<&str> = rest.split(':').collect();
@@ -48,9 +50,16 @@ pub fn parse_uevent_text(text: &str) -> Option<HidInfo> {
         {
             let n = rest[idx + 6..].chars().take_while(|c| c.is_ascii_digit());
             iface = n.collect::<String>().parse().unwrap_or(-1);
+        } else if let Some(rest) = line.strip_prefix("HID_UNIQ=") {
+            virtual_clone = rest.starts_with("puckctl");
         }
     }
-    have_id.then_some(HidInfo { vid, pid, iface })
+    have_id.then_some(HidInfo {
+        vid,
+        pid,
+        iface,
+        virtual_clone,
+    })
 }
 
 #[must_use]
@@ -62,8 +71,9 @@ pub fn puck_hidraw_present() -> bool {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         name.starts_with("hidraw")
-            && parse_uevent(&name)
-                .is_some_and(|info| info.vid == VALVE_VID && is_puck_pid(info.pid))
+            && parse_uevent(&name).is_some_and(|info| {
+                !info.virtual_clone && info.vid == VALVE_VID && is_puck_pid(info.pid)
+            })
     })
 }
 
@@ -84,7 +94,7 @@ fn scan_devices_hidraw() -> Vec<Slot> {
         let Some(info) = parse_uevent(&name) else {
             continue;
         };
-        if !is_bridge_target(info.vid, info.pid, info.iface) {
+        if info.virtual_clone || !is_bridge_target(info.vid, info.pid, info.iface) {
             continue;
         }
         let path = format!("/dev/{name}");
@@ -127,22 +137,27 @@ pub fn scan_devices(
     usb: &mut Option<UsbDevice>,
 ) -> Vec<Slot> {
     usb::usbfs_release(usb);
-    let mut slots = scan_devices_hidraw();
-    if slots.is_empty() && requested == Mode::Lizard && usb::restore_hid_drivers() {
-        slots = scan_devices_hidraw();
-    }
-    // Gamepad gyro is SDL hidapi on the real hidraw node. Only steal USB if
-    // hidraw is gone (Steam already unbound it) so buttons still work.
-    if slots.is_empty() && override_steam && requested == Mode::Gamepad {
+    // Gamepad + Steam: keep exclusive USB so Steam cannot remount desktop.
+    // Gyro is cloned onto uhid (wired Triton PID) after the controller connects.
+    if override_steam && requested == Mode::Gamepad {
         match usb::scan_devices_usbfs() {
             Ok((claimed_slots, claimed)) if !claimed_slots.is_empty() => {
-                logln("Steam override: hidraw missing, claimed USB (no hidapi gyro)");
+                logln("Steam override: claimed USB (Steam cannot keep desktop)");
                 *usb = claimed;
                 return claimed_slots;
             }
-            Ok(_) => logln("Steam override: usbfs claim failed"),
-            Err(err) => logln(format!("Steam override: usbfs claim failed: {err}")),
+            Ok(_) => logln("Steam override: usbfs claim failed, falling back to hidraw"),
+            Err(err) => logln(format!(
+                "Steam override: usbfs claim failed, falling back to hidraw: {err}"
+            )),
         }
+    }
+    if override_steam && requested == Mode::Lizard {
+        usb::kick_hid_drivers();
+    }
+    let mut slots = scan_devices_hidraw();
+    if slots.is_empty() && requested == Mode::Lizard && usb::restore_hid_drivers() {
+        slots = scan_devices_hidraw();
     }
     slots
 }
@@ -153,17 +168,11 @@ pub fn close_all(
     usb: &mut Option<UsbDevice>,
 ) {
     crate::grab::ungrab(grabs);
-    let mut via_usbfs = false;
     for slot in slots.drain(..) {
         let mut slot = slot;
         crate::pad::destroy_pad(&mut slot);
-        if slot.transport.is_usbfs() {
-            via_usbfs = true;
-        }
     }
-    if via_usbfs {
-        usb::usbfs_release(usb);
-    }
+    usb::usbfs_release(usb);
 }
 
 #[cfg(test)]
@@ -181,6 +190,13 @@ HID_PHYS=usb-0000:00:14.0-1/input2
         assert_eq!(info.vid, 0x28DE);
         assert_eq!(info.pid, 0x1304);
         assert_eq!(info.iface, 2);
+        assert!(!info.virtual_clone);
+        let clone = parse_uevent_text(
+            "HID_ID=0003:000028DE:00001302\nHID_UNIQ=puckctl-if2\nHID_PHYS=usb-puckctl/input2\n",
+        )
+        .unwrap();
+        assert!(clone.virtual_clone);
+        assert_eq!(clone.iface, 2);
     }
 
     #[test]
@@ -202,7 +218,14 @@ HID_PHYS=usb-0000:00:14.0-1/input2
         let mut usb = None;
         close_all(&mut slots, &mut grabs, &mut usb);
         assert!(slots.is_empty());
-        let mut slots = vec![Slot::new("usb".into(), 2, Transport::Usbfs { ep_in: 0x83 })];
+        let mut slots = vec![Slot::new(
+            "usb".into(),
+            2,
+            Transport::Usbfs {
+                ep_in: 0x83,
+                ep_out: 0x02,
+            },
+        )];
         close_all(&mut slots, &mut grabs, &mut usb);
         assert!(slots.is_empty());
     }

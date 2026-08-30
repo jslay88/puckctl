@@ -87,8 +87,8 @@ Binaries land in the repo root and in `target/release/`.
 ## Device access (udev)
 
 Gamepad mode creates a uinput pad and talks to hidraw (and, while Steam
-override is on and Steam is running, the USB device node). Your user needs
-access to those nodes.
+override is on and Steam is running, the USB device node plus `/dev/uhid`
+for the virtual hidraw clone). Your user needs access to those nodes.
 
 Many machines already have Valve's `steam-devices` package and a uinput
 rule. Check first:
@@ -107,8 +107,10 @@ sudo make install-udev
 ```
 
 That installs [`udev/60-puckctl.rules`](../udev/60-puckctl.rules) for
-hidraw `28de:1302`–`1305` and uinput, then reloads udev. Unplug and replug
-the dongle, or log out and back in, if access does not appear immediately.
+hidraw `28de:1302`–`1305`, uinput, and uhid, then reloads udev. Unplug and
+replug the dongle, or log out and back in, if access does not appear
+immediately. Also check `getfacl /dev/uhid` if gyro is missing while
+Steam override is on.
 
 Remove those rules with `sudo make uninstall-udev`. Do not do that if you
 still need Steam's own udev package.

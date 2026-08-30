@@ -167,12 +167,20 @@ impl PuckTray {
     }
 
     fn connection_label(&self) -> &'static str {
-        if self.yielded() {
-            "Steam has the controller"
-        } else if self.status.connected {
+        if self.yielded() || self.status.connected {
             "Connected"
         } else {
             "Disconnected"
+        }
+    }
+
+    fn tooltip_text(&self) -> String {
+        let mode = self.label();
+        let conn = self.connection_label();
+        if mode == conn {
+            mode
+        } else {
+            format!("{mode} — {conn}")
         }
     }
 
@@ -291,7 +299,7 @@ impl Tray for PuckTray {
     fn tool_tip(&self) -> ToolTip {
         ToolTip {
             title: APP_TITLE.into(),
-            description: format!("{} — {}", self.label(), self.connection_label()),
+            description: self.tooltip_text(),
             ..Default::default()
         }
     }
@@ -455,6 +463,7 @@ mod tests {
         assert_eq!(t.icon_kind(), icons::Kind::Gamepad);
         assert_eq!(t.label(), "Gamepad");
         assert_eq!(t.connection_label(), "Connected");
+        assert_eq!(t.tooltip_text(), "Gamepad — Connected");
         assert_eq!(t.icon_tone(), icons::Tone::Color);
         assert!(t.combo_label().contains('A'));
 
@@ -473,7 +482,8 @@ mod tests {
         assert!(t.yielded());
         assert_eq!(t.icon_kind(), icons::Kind::Gamepad);
         assert_eq!(t.label(), "Steam has the controller");
-        assert_eq!(t.connection_label(), "Steam has the controller");
+        assert_eq!(t.connection_label(), "Connected");
+        assert_eq!(t.tooltip_text(), "Steam has the controller — Connected");
         assert_eq!(t.icon_tone(), icons::Tone::Steam);
 
         let t = tray(Status::default());

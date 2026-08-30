@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.2 - 2026-08-30
+
+- Gamepad + Steam override holds USB and clones Triton HID onto a virtual
+  hidraw (`uhid`, `28de:1302`) so SDL gyro still works
+- Turning override off restores Steam desktop and keeps lizard on so
+  Steam hidapi does not snap the Puck back to gamepad
+- Tray tooltip no longer repeats "Steam has the controller"
+
 ## 0.1.1 - 2026-08-30
 
 - Gamepad mode keeps hidraw when Steam override is on, so SDL gyro still works

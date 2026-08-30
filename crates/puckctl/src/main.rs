@@ -37,6 +37,7 @@ mod steam_cfg;
 mod sys;
 #[cfg(test)]
 mod test_env;
+mod uhid;
 mod urb;
 mod usb;
 

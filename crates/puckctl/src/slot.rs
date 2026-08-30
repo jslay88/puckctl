@@ -7,6 +7,7 @@ use puckctl_protocol::{
 
 use crate::hid::{self, Transport};
 use crate::pad::VirtualPad;
+use crate::uhid::UhidDevice;
 use crate::usb::UsbDevice;
 
 pub const MAX_SLOTS: usize = 4;
@@ -17,6 +18,7 @@ pub struct Slot {
     pub iface: i32,
     pub transport: Transport,
     pub pad: Option<VirtualPad>,
+    pub uhid: Option<UhidDevice>,
     pub connected: bool,
     pub last_lizard: Option<Instant>,
     pub last_buttons: u32,
@@ -32,6 +34,7 @@ impl Slot {
             iface,
             transport,
             pad: None,
+            uhid: None,
             connected: false,
             last_lizard: None,
             last_buttons: 0,
@@ -67,8 +70,8 @@ impl Slot {
         self.last_lizard = Some(Instant::now());
     }
 
-    pub fn lizard_due(&self, steam_override: bool, steam_seen: bool) -> bool {
-        let ms = if steam_override && steam_seen {
+    pub fn lizard_due(&self, steam_override: bool, steam_seen: bool, paused: bool) -> bool {
+        let ms = if steam_seen && (steam_override || paused) {
             LIZARD_HEARTBEAT_STEAM_MS
         } else {
             LIZARD_HEARTBEAT_MS
@@ -91,12 +94,14 @@ mod tests {
     fn lizard_due_and_feature_errors() {
         let (r, _w) = crate::test_env::nonblock_pipe();
         let mut slot = Slot::new("pipe".into(), 2, Transport::Hidraw(r));
-        assert!(slot.lizard_due(false, false));
-        assert!(slot.lizard_due(true, true));
+        assert!(slot.lizard_due(false, false, false));
+        assert!(slot.lizard_due(true, true, false));
+        assert!(slot.lizard_due(false, true, true));
         slot.send_lizard_off(None);
-        assert!(!slot.lizard_due(true, true));
+        assert!(!slot.lizard_due(true, true, false));
+        assert!(!slot.lizard_due(false, true, true));
         slot.last_lizard = Some(Instant::now() - Duration::from_secs(4));
-        assert!(slot.lizard_due(false, false));
+        assert!(slot.lizard_due(false, false, false));
         slot.send_lizard_on(None);
         Slot::log_feature_err("op", "p", &std::io::Error::from_raw_os_error(libc::EPIPE));
         Slot::log_feature_err("op", "p", &std::io::Error::other("nope"));

@@ -7,7 +7,6 @@ use crate::control::{self, CommandKind, MAX_CLIENTS};
 use crate::daemon::Daemon;
 use crate::grab;
 use crate::log::logln;
-use crate::mode::Mode;
 use crate::pad;
 use crate::scan;
 use crate::steam_cfg;
@@ -17,6 +16,7 @@ enum PollTag {
     Listen,
     Client(usize),
     Hid(usize),
+    Uhid(usize),
     Grab(usize),
 }
 
@@ -25,6 +25,8 @@ impl Daemon {
         if self.override_steam {
             steam_cfg::hide_steam_desktop_config(true);
             self.steam_seen = crate::steam::steam_is_running();
+        } else {
+            steam_cfg::hide_steam_desktop_config(false);
         }
         logln(format!(
             "puckctl starting{} (mode={})",
@@ -39,8 +41,7 @@ impl Daemon {
             self.steam_tick();
 
             if !self.paused && self.slots.is_empty() && crate::hw::allowed() {
-                self.slots =
-                    scan::scan_devices(self.claim_from_steam(), self.requested, &mut self.usb);
+                self.slots = scan::scan_devices(false, self.requested, &mut self.usb);
                 if !self.slots.is_empty() {
                     if self.dump {
                         self.lizard_all(false);
@@ -77,6 +78,14 @@ impl Daemon {
                             revents: 0,
                         });
                         tags.push(PollTag::Hid(i));
+                    }
+                    if let Some(uhid) = &slot.uhid {
+                        pfds.push(libc::pollfd {
+                            fd: uhid.raw_fd(),
+                            events: libc::POLLIN,
+                            revents: 0,
+                        });
+                        tags.push(PollTag::Uhid(i));
                     }
                 }
                 for (i, grab) in self.grabs.iter().enumerate() {
@@ -135,6 +144,7 @@ impl Daemon {
                             device_lost = true;
                         }
                     }
+                    PollTag::Uhid(i) => self.pump_uhid(i),
                 }
             }
 
@@ -142,9 +152,7 @@ impl Daemon {
                 device_lost = true;
             }
 
-            if !self.paused && self.requested == Mode::Gamepad {
-                self.lizard_heartbeat();
-            }
+            self.lizard_heartbeat();
 
             if device_lost {
                 self.close_all();
@@ -243,6 +251,18 @@ impl Daemon {
         }
     }
 
+    fn pump_uhid(&mut self, i: usize) {
+        let Some(slot) = self.slots.get(i) else {
+            return;
+        };
+        let Some(uhid) = slot.uhid.as_ref() else {
+            return;
+        };
+        let iface = slot.iface;
+        let ep_out = slot.transport.usbfs_ep_out().unwrap_or(0);
+        uhid.pump(self.usb.as_ref(), iface, ep_out);
+    }
+
     fn usbfs_recv(&self, i: usize, buf: &mut [u8]) -> Option<Result<usize, ()>> {
         let slot = self.slots.get(i)?;
         match slot.read_report(self.usb.as_ref(), buf) {
@@ -313,14 +333,22 @@ mod tests {
             assert!(!d.read_hid(3));
             assert!(!d.read_usbfs(3));
             assert!(d.usbfs_recv(3, &mut [0; 8]).is_none());
+            d.pump_uhid(0);
+            d.pump_uhid(99);
 
             let (r, _w) = crate::test_env::nonblock_pipe();
             d.slots
                 .push(Slot::new("hid".into(), 2, Transport::Hidraw(r)));
             assert!(!d.read_hid(0));
 
-            d.slots
-                .push(Slot::new("usb".into(), 3, Transport::Usbfs { ep_in: 0x83 }));
+            d.slots.push(Slot::new(
+                "usb".into(),
+                3,
+                Transport::Usbfs {
+                    ep_in: 0x83,
+                    ep_out: 0x03,
+                },
+            ));
             assert!(d.read_usbfs(1));
             d.slots[1].connected = false;
             assert!(d.read_usbfs_slots());
@@ -348,8 +376,14 @@ mod tests {
             d.dump = true;
             d.slots
                 .push(Slot::new("hid".into(), 2, Transport::Hidraw(hid_r)));
-            d.slots
-                .push(Slot::new("usb".into(), 3, Transport::Usbfs { ep_in: 0x83 }));
+            d.slots.push(Slot::new(
+                "usb".into(),
+                3,
+                Transport::Usbfs {
+                    ep_in: 0x83,
+                    ep_out: 0x03,
+                },
+            ));
             d.grabs.push(grab_r);
             hid_w.write_all(&state_bytes(BTN_A)).unwrap();
             grab_w.write_all(&[1, 2, 3, 4]).unwrap();

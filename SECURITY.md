@@ -17,4 +17,4 @@ reply when I have looked at it. There is no bug bounty.
 
 - "Steam can take the controller" (that is [docs/steam.md](docs/steam.md))
 - Missing distro packages
-- Games that don't see gyro because override has claimed USB
+- Games that don't see gyro when `/dev/uhid` is not writable (udev)

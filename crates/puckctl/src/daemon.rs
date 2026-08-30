@@ -27,6 +27,7 @@ pub struct Daemon {
     combo_armed: bool,
     combo_watch: Option<Instant>,
     last_steam_check: Instant,
+    steam_missing_since: Option<Instant>,
 }
 
 impl Daemon {
@@ -56,6 +57,7 @@ impl Daemon {
             combo_watch: None,
             last_steam_check: Instant::now() - Duration::from_secs(3),
             last_usbfs_probe: Instant::now() - Duration::from_secs(1),
+            steam_missing_since: None,
         }
     }
 
@@ -159,44 +161,39 @@ impl Daemon {
         self.override_steam && self.steam_seen
     }
 
+    /// Drop Steam's hidraw fds, then reopen hidraw so our lizard on/off sticks.
+    fn retake_from_steam(&mut self) {
+        if !self.claim_from_steam() || !crate::hw::allowed() {
+            return;
+        }
+        crate::steam_cfg::hide_steam_desktop_config(true);
+        logln("Steam override: retaking the controller for the requested mode");
+        self.close_all();
+        self.slots = scan::scan_devices(true, self.requested, &mut self.usb);
+    }
+
     pub(crate) fn apply_requested_mode(&mut self) {
         if self.paused || self.dump {
             return;
         }
+        self.retake_from_steam();
         if self.requested == Mode::Gamepad {
             self.lizard_all(false);
             grab::grab_lizard_inputs(&mut self.grabs);
-            let hidraw_only = self.slots.iter().any(|slot| !slot.transport.is_usbfs());
             for slot in &mut self.slots {
-                if !slot.connected || slot.pad.is_some() || !slot.transport.is_usbfs() {
-                    continue;
-                }
-                if let Ok(pad) = pad::create_uinput() {
-                    slot.last_buttons = 0;
-                    slot.last_abs = [0; 6];
-                    slot.last_hat = [0; 2];
-                    logln(format!(
-                        "virtual Steam Controller pad created for {}",
-                        slot.path
-                    ));
-                    slot.pad = Some(pad);
-                }
+                pad::attach_override_devices(slot);
             }
-            if hidraw_only {
-                logln("mode: gamepad (hidraw, SDL keeps gyro)");
-            } else {
-                logln("mode: gamepad");
-            }
+            logln("mode: gamepad");
         } else {
             for slot in &mut self.slots {
                 pad::destroy_pad(slot);
             }
             grab::ungrab(&mut self.grabs);
-            self.lizard_all(true);
             if self.slots.first().is_some_and(|s| s.transport.is_usbfs()) {
                 logln("releasing USB claim so lizard keyboard/mouse can bind");
                 self.close_all();
             }
+            self.lizard_all(true);
             logln("mode: lizard");
         }
     }
@@ -223,7 +220,31 @@ impl Daemon {
         self.override_steam = change.override_steam;
         self.paused = change.paused;
         self.steam_seen = change.steam_seen;
+        if !on && change.paused {
+            self.yield_to_steam();
+        } else {
+            self.close_all();
+        }
+    }
+
+    fn yield_to_steam(&mut self) {
+        self.lizard_all(true);
+        if crate::hw::allowed() {
+            std::thread::sleep(Duration::from_millis(80));
+        }
         self.close_all();
+        if crate::hw::allowed() {
+            logln("Steam override off: kicking hid so Steam binds desktop");
+            crate::usb::kick_hid_drivers();
+        }
+        self.bind_yield_slots();
+    }
+
+    fn bind_yield_slots(&mut self) {
+        if crate::hw::allowed() && self.slots.is_empty() {
+            self.slots = scan::scan_devices(false, Mode::Lizard, &mut self.usb);
+        }
+        self.lizard_all(true);
     }
 
     pub(crate) fn handle_command(&mut self, cmd: CommandKind) -> String {
@@ -269,30 +290,56 @@ impl Daemon {
             return;
         }
         self.last_steam_check = Instant::now();
-        self.steam_seen = steam::steam_is_running();
+        let steam = steam::steam_is_running();
+        let steam_appeared = steam && !self.steam_seen;
+        self.steam_seen = steam;
+        if steam {
+            self.steam_missing_since = None;
+        } else {
+            self.steam_missing_since.get_or_insert_with(Instant::now);
+        }
         if self.override_steam {
+            crate::steam_cfg::hide_steam_desktop_config(true);
             if self.requested == Mode::Gamepad && !self.paused {
                 grab::grab_lizard_inputs(&mut self.grabs);
+                if crate::hw::allowed() && steam_appeared {
+                    logln("Steam override: Steam started, rescanning so hidraw/gyro stays");
+                    self.close_all();
+                }
             }
         } else if self.steam_seen && !self.paused {
             logln("Steam client detected — releasing controller");
             self.close_all();
             self.paused = true;
+            self.bind_yield_slots();
         } else if !self.steam_seen && self.paused {
-            logln("Steam exited — reclaiming controller");
-            self.paused = false;
+            let gone = self
+                .steam_missing_since
+                .is_some_and(|t| t.elapsed() >= Duration::from_secs(4));
+            if gone {
+                logln("Steam exited — reclaiming controller");
+                self.paused = false;
+            }
         }
     }
 
     pub(crate) fn lizard_heartbeat(&mut self) {
-        if self.requested != Mode::Gamepad {
-            return;
-        }
         let override_steam = self.override_steam;
         let steam_seen = self.steam_seen;
+        let paused = self.paused;
+        let desktop = paused || self.requested != Mode::Gamepad;
         let usb = self.usb.as_ref();
         for slot in &mut self.slots {
-            if slot.connected && slot.lizard_due(override_steam, steam_seen) {
+            let due = slot.lizard_due(override_steam, steam_seen, paused);
+            if !due {
+                continue;
+            }
+            if !slot.connected && !paused {
+                continue;
+            }
+            if desktop {
+                slot.send_lizard_on(usb);
+            } else {
                 slot.send_lizard_off(usb);
             }
         }
@@ -390,6 +437,11 @@ mod tests {
             d.slots.push(Slot::new("h".into(), 2, Transport::Hidraw(r)));
             d.slots[0].connected = true;
             d.steam_tick();
+            // Tests never touch live USB. Live daemon kicks hid when Steam appears.
+            assert_eq!(d.slots.len(), 1);
+            assert!(!d.slots[0].transport.is_usbfs());
+            d.steam_seen = true;
+            d.apply_requested_mode();
             assert_eq!(d.slots.len(), 1);
             assert!(!d.slots[0].transport.is_usbfs());
             d.override_steam = false;
@@ -397,9 +449,16 @@ mod tests {
             d.last_steam_check = Instant::now() - Duration::from_secs(3);
             d.steam_tick();
             d.paused = true;
+            d.steam_missing_since = Some(Instant::now() - Duration::from_secs(5));
             d.last_steam_check = Instant::now() - Duration::from_secs(3);
             d.steam_tick();
             d.lizard_heartbeat();
+            d.paused = true;
+            let (r2, _w2) = crate::test_env::nonblock_pipe();
+            d.slots
+                .push(Slot::new("y".into(), 2, Transport::Hidraw(r2)));
+            d.lizard_heartbeat();
+            d.paused = false;
             d.requested = Mode::Lizard;
             d.lizard_heartbeat();
             d.requested = Mode::Gamepad;
@@ -412,8 +471,14 @@ mod tests {
             d.paused = false;
             d.requested = Mode::Lizard;
             d.slots.clear();
-            d.slots
-                .push(Slot::new("u".into(), 2, Transport::Usbfs { ep_in: 0x83 }));
+            d.slots.push(Slot::new(
+                "u".into(),
+                2,
+                Transport::Usbfs {
+                    ep_in: 0x83,
+                    ep_out: 0x02,
+                },
+            ));
             d.apply_requested_mode();
             d.close_all();
             let _ = d.any_connected();

@@ -25,6 +25,7 @@ use crate::log::logln;
 use crate::mode::Mode;
 use crate::slot::Slot;
 use crate::sys;
+use crate::uhid::UhidDevice;
 use crate::usb::{UsbDevice, open_rw_nonblock};
 
 const UINPUT_NAME: &[u8] = b"Steam Controller";
@@ -125,6 +126,36 @@ pub fn destroy_pad(slot: &mut Slot) {
     if let Some(pad) = slot.pad.take() {
         let _ = sys::ui_dev_destroy(pad.fd.as_fd());
     }
+    slot.uhid.take();
+}
+
+pub fn attach_override_devices(slot: &mut Slot) {
+    if !slot.connected || !slot.transport.is_usbfs() {
+        return;
+    }
+    if slot.uhid.is_none() {
+        match UhidDevice::create(slot.iface) {
+            Ok(dev) => slot.uhid = Some(dev),
+            Err(_) => {}
+        }
+    }
+    // Prefer the hidraw clone for SDL gyro. uinput is only a fallback when
+    // /dev/uhid is missing, so the game does not pick an evdev pad with no IMU.
+    if slot.pad.is_none() && slot.uhid.is_none() {
+        match create_uinput() {
+            Ok(pad) => {
+                slot.last_buttons = 0;
+                slot.last_abs = [0; 6];
+                slot.last_hat = [0; 2];
+                logln(format!(
+                    "virtual Steam Controller pad created for {}",
+                    slot.path
+                ));
+                slot.pad = Some(pad);
+            }
+            Err(_) => {}
+        }
+    }
 }
 
 fn ev(type_: u16, code: u16, value: i32) -> InputEvent {
@@ -206,23 +237,13 @@ pub fn set_connected(
             "controller connected on {} (interface {})",
             slot.path, slot.iface
         ));
-        if requested == Mode::Gamepad && !paused {
+        if !paused && requested == Mode::Gamepad {
             slot.send_lizard_off(usb);
-            if !dump && slot.pad.is_none() && slot.transport.is_usbfs() {
-                match create_uinput() {
-                    Ok(pad) => {
-                        slot.last_buttons = 0;
-                        slot.last_abs = [0; 6];
-                        slot.last_hat = [0; 2];
-                        logln(format!(
-                            "virtual Steam Controller pad created for {}",
-                            slot.path
-                        ));
-                        slot.pad = Some(pad);
-                    }
-                    Err(_) => {}
-                }
+            if !dump {
+                attach_override_devices(slot);
             }
+        } else if !paused && requested == Mode::Lizard {
+            slot.send_lizard_on(usb);
         }
     } else {
         logln(format!("controller disconnected on {}", slot.path));
@@ -263,9 +284,16 @@ pub fn ingest_report(
             set_connected(slot, true, requested, paused, dump, usb);
         }
         Some(Report::Wireless(WirelessStatus::Disconnect)) => {
+            if let Some(uhid) = &slot.uhid {
+                let _ = uhid.input(data);
+            }
             set_connected(slot, false, requested, paused, dump, usb);
+            return;
         }
         _ => {}
+    }
+    if let Some(uhid) = &slot.uhid {
+        let _ = uhid.input(data);
     }
 }
 
@@ -341,11 +369,25 @@ mod tests {
 
     #[test]
     fn usbfs_connect_skips_uinput_in_tests() {
-        let mut slot = Slot::new("usb".into(), 2, Transport::Usbfs { ep_in: 0x83 });
+        let mut slot = Slot::new(
+            "usb".into(),
+            2,
+            Transport::Usbfs {
+                ep_in: 0x83,
+                ep_out: 0x02,
+            },
+        );
         set_connected(&mut slot, true, Mode::Gamepad, false, false, None);
         assert!(slot.connected);
         assert!(slot.pad.is_none());
+        assert!(slot.uhid.is_none());
+        attach_override_devices(&mut slot);
+        assert!(slot.uhid.is_none());
+        assert!(slot.pad.is_none());
         set_connected(&mut slot, true, Mode::Gamepad, false, false, None);
+        set_connected(&mut slot, false, Mode::Lizard, false, false, None);
+        set_connected(&mut slot, true, Mode::Lizard, false, false, None);
+        assert!(slot.connected);
     }
 
     #[test]

@@ -94,6 +94,21 @@ impl UsbDevice {
     }
 }
 
+/// Claim then release so Steam's hidraw fds die and the hid driver rebinds.
+pub fn kick_hid_drivers() {
+    if !crate::hw::allowed() {
+        return;
+    }
+    match scan_devices_usbfs() {
+        Ok((_, mut held)) if held.is_some() => {
+            logln("Steam override: kicked USB hid so Steam drops the device");
+            usbfs_release(&mut held);
+        }
+        Ok(_) => {}
+        Err(err) => logln(format!("Steam override: hid kick failed: {err}")),
+    }
+}
+
 pub fn usbfs_release(usb: &mut Option<UsbDevice>) {
     let Some(mut dev) = usb.take() else {
         return;
@@ -204,7 +219,7 @@ pub(crate) fn scan_usbfs_with(
             "slot {}: {path} (usbfs iface {iface} ep_in={ep_in:02x} ep_out={ep_out:02x})",
             slots.len()
         ));
-        slots.push(Slot::new(path, iface, Transport::Usbfs { ep_in }));
+        slots.push(Slot::new(path, iface, Transport::Usbfs { ep_in, ep_out }));
     }
 
     Ok((slots, Some(UsbDevice::new(fd, claimed))))
@@ -277,7 +292,7 @@ pub(crate) fn find_puck_usb_via_hidraw() -> Option<(PathBuf, String)> {
         let Some(info) = parse_uevent(&name) else {
             continue;
         };
-        if info.vid != VALVE_VID || !is_puck_pid(info.pid) {
+        if info.virtual_clone || info.vid != VALVE_VID || !is_puck_pid(info.pid) {
             continue;
         }
         let mut walk = PathBuf::from(format!("/sys/class/hidraw/{name}/device"));
@@ -425,7 +440,14 @@ mod tests {
         let file = File::open("/dev/null").unwrap();
         let mut dev = UsbDevice::new(file, vec![2, 3]);
         let slots = [
-            Slot::new("u".into(), 2, Transport::Usbfs { ep_in: 0x83 }),
+            Slot::new(
+                "u".into(),
+                2,
+                Transport::Usbfs {
+                    ep_in: 0x83,
+                    ep_out: 0x02,
+                },
+            ),
             Slot::new(
                 "h".into(),
                 3,
@@ -442,6 +464,7 @@ mod tests {
         assert!(opt.is_none());
         usbfs_release(&mut opt);
         let _ = restore_hid_drivers();
+        kick_hid_drivers();
         let _ = find_puck_usb();
         let _ = find_puck_usb_sysfs();
         let _ = find_puck_usb_via_hidraw();
