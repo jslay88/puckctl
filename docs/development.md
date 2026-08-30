@@ -85,12 +85,15 @@ One-time setup:
    ```
 
 3. Paste `aur-puckctl.pub` into the AUR account SSH keys page.
-4. Repo Settings → Secrets and variables → Actions → `AUR_SSH_PRIVATE_KEY`
-   = the private key file (including `BEGIN` / `END` lines).
+4. Repo Settings → Secrets and variables → Actions:
+   - `AUR_SSH_PRIVATE_KEY` — private key file (including `BEGIN` / `END`)
+   - `AUR_USERNAME` — AUR account name
+   - `AUR_EMAIL` — AUR account email
 
-Until that secret exists, the AUR job is skipped. After it is set, run
-**Actions → AUR → Run workflow** with tag `v0.1.0` to publish the current
-release, or cut the next tag and it will publish on its own.
+Until `AUR_SSH_PRIVATE_KEY` exists, the AUR job is skipped. After the
+secrets are set, run **Actions → AUR → Run workflow** with tag `v0.1.0`
+to publish the current release, or cut the next tag and it will publish
+on its own.
 
 `RUSTUP_TOOLCHAIN=stable` in the PKGBUILD so `makepkg` uses distro rust
 instead of the repo `rust-toolchain.toml` pin.
