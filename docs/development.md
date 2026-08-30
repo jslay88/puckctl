@@ -90,10 +90,9 @@ One-time setup:
    - `AUR_USERNAME` — AUR account name
    - `AUR_EMAIL` — AUR account email
 
-Until `AUR_SSH_PRIVATE_KEY` exists, the AUR job is skipped. After the
-secrets are set, run **Actions → AUR → Run workflow** with tag `v0.1.0`
-to publish the current release, or cut the next tag and it will publish
-on its own.
+After the secrets are set, run **Actions → AUR → Run workflow** with tag
+`v0.1.0` to publish the current release, or cut the next tag and it will
+publish on its own.
 
 `RUSTUP_TOOLCHAIN=stable` in the PKGBUILD so `makepkg` uses distro rust
 instead of the repo `rust-toolchain.toml` pin.

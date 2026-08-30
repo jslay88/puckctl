@@ -16,7 +16,6 @@ permissions:
 jobs:
   aur:
     name: publish
-    if: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
