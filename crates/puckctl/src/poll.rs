@@ -29,9 +29,10 @@ impl Daemon {
             steam_cfg::hide_steam_desktop_config(false);
         }
         logln(format!(
-            "puckctl starting{} (mode={})",
+            "puckctl starting{} (mode={} pad={})",
             if self.dump { " (dump mode)" } else { "" },
-            self.requested.name()
+            self.requested.name(),
+            self.pad_identity.name()
         ));
 
         let mut clients: Vec<Option<UnixStream>> = (0..MAX_CLIENTS).map(|_| None).collect();
@@ -41,7 +42,7 @@ impl Daemon {
             self.steam_tick();
 
             if !self.paused && self.slots.is_empty() && crate::hw::allowed() {
-                self.slots = scan::scan_devices(false, self.requested, &mut self.usb);
+                self.slots = scan::scan_devices(self.override_steam, self.requested, &mut self.usb);
                 if !self.slots.is_empty() {
                     if self.dump {
                         self.lizard_all(false);
@@ -207,11 +208,20 @@ impl Daemon {
                 }
             };
             let requested = self.requested;
+            let identity = self.pad_identity;
             let paused = self.paused;
             let dump = self.dump;
             let usb = self.usb.as_ref();
             let prev = self.slots[i].last_buttons;
-            pad::ingest_report(&mut self.slots[i], &buf[..n], requested, paused, dump, usb);
+            pad::ingest_report(
+                &mut self.slots[i],
+                &buf[..n],
+                requested,
+                identity,
+                paused,
+                dump,
+                usb,
+            );
             let now = self.slots[i].last_buttons;
             if self.consider_combo(prev, now) {
                 return false;
@@ -235,6 +245,7 @@ impl Daemon {
                 &mut self.slots[i],
                 &buf[..n],
                 self.requested,
+                self.pad_identity,
                 self.paused,
                 self.dump,
                 self.usb.as_ref(),

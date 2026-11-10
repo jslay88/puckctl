@@ -12,7 +12,9 @@ puckctl [command] [--dump] [--no-steam-check]
 
 | Command | What it does |
 |---|---|
-| `gamepad` | Desktop firmware off, virtual Steam Controller pad |
+| `gamepad` | Desktop firmware off, virtual pad (last saved identity) |
+| `gamepad xbox` | Same, report as a Microsoft Xbox 360 pad (SDL2). No gyro |
+| `gamepad steam` | Same, report as a Steam Controller. hidapi gyro works |
 | `lizard` | Firmware keyboard and mouse (desktop mode) |
 | `toggle` | Flip between those two |
 | `override on` / `off` / `toggle` | Keep control while Steam is running ([steam.md](steam.md)) |
@@ -20,7 +22,7 @@ puckctl [command] [--dump] [--no-steam-check]
 | `combo HEX` | Set that combo (example: `combo 0x11`) |
 | `combo clear` | Remove the combo |
 | `buttons` | Current button mask from the controller |
-| `status` | Effective mode, requested mode, Steam, override, connected, combo |
+| `status` | Effective mode, requested mode, Steam, override, connected, battery, combo, pad |
 | `quit` | Stop the daemon |
 | `-h` / `--help` | Usage |
 | `-V` / `--version` | Version |
@@ -36,12 +38,13 @@ hold-to-set window (the tray menu does this for you).
 `puckctl status` prints one line, for example:
 
 ```
-OK effective=gamepad requested=gamepad steam=0 override=1 connected=1 combo=11 daemon=1
+OK effective=gamepad requested=gamepad steam=0 override=1 connected=1 combo=11 pad=xbox daemon=1 battery=80 charging=0
 ```
 
 `effective` is what is live (`gamepad`, `lizard`, or `steam` when yielded).
-`combo` is hex. `daemon=0` means the client printed a fallback because
-nothing was listening.
+`pad` is `xbox` or `steam`. `combo` is hex. `battery` and `charging` are
+present after the Puck has sent a battery report. `daemon=0` means the
+client printed a fallback because nothing was listening.
 
 ## State files
 
@@ -50,6 +53,7 @@ Under `~/.local/state/puckctl` (or `$XDG_STATE_HOME/puckctl`):
 | File | Contents |
 |---|---|
 | `mode` | Last requested mode |
+| `pad` | `xbox` or `steam` (virtual pad identity) |
 | `override` | `on` or `off` |
 | `combo` | Hex mask |
 | `cfgbak/` | Steam config backups while override is on |

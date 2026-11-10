@@ -156,7 +156,7 @@ pub fn scan_devices(
         usb::kick_hid_drivers();
     }
     let mut slots = scan_devices_hidraw();
-    if slots.is_empty() && requested == Mode::Lizard && usb::restore_hid_drivers() {
+    if slots.is_empty() && usb::restore_hid_drivers() {
         slots = scan_devices_hidraw();
     }
     slots

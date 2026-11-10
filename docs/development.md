@@ -114,11 +114,11 @@ under `#[cfg(test)]`; that is normal Rust.
 | `poll` | Event loop |
 | `hid` / `usb` / `urb` | hidraw and usbfs I/O |
 | `uhid` | Virtual Triton hidraw while USB is claimed |
-| `pad` | Virtual Steam Controller (uinput) |
+| `pad` | Virtual Xbox 360 or Steam Controller (uinput) |
+| `mode` / `combo` / `paths` | Prefs (including pad identity) |
 | `grab` | Lizard keyboard/mouse evdev grab |
 | `scan` / `slot` | Device discovery |
 | `steam` / `steam_cfg` | Steam process + VDF patch |
-| `mode` / `combo` / `paths` | Prefs |
 
 ## Logging
 

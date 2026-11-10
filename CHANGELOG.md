@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Gamepad mode can report as an Xbox 360 pad (SDL2 / 2s2h) or a Steam
+  Controller (Valve VID/PID + hidraw gyro). Default is Xbox.
+  `puckctl gamepad xbox|steam`; tray has both radios
+- Gamepad scan uses Steam override (usbfs) and rebinds hid when hidraw is
+  gone, so a dongle with no kernel driver is not stuck Disconnected
+- Tray shows battery percent under Connected, Charging when plugged in,
+  and turns the icon red below 10%
+
 ## 0.1.2 - 2026-08-30
 
 - Gamepad + Steam override holds USB and clones Triton HID onto a virtual

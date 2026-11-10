@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -9,7 +10,7 @@ use std::time::Duration;
 
 use puckctl_protocol::EXIT_ALREADY_RUNNING;
 
-use crate::mode::Mode;
+use crate::mode::{Mode, PadIdentity};
 use crate::paths::{self, log_path, socket_path};
 use crate::steam;
 
@@ -19,6 +20,8 @@ pub const MAX_CLIENTS: usize = 4;
 pub enum CommandKind {
     Status,
     Gamepad,
+    GamepadXbox,
+    GamepadSteam,
     Lizard,
     Toggle,
     OverrideOn,
@@ -38,6 +41,8 @@ impl CommandKind {
         match parts.next().unwrap_or("") {
             "status" => Self::Status,
             "gamepad" => Self::Gamepad,
+            "gamepad-xbox" => Self::GamepadXbox,
+            "gamepad-steam" => Self::GamepadSteam,
             "lizard" => Self::Lizard,
             "toggle" => Self::Toggle,
             "override-on" => Self::OverrideOn,
@@ -55,6 +60,7 @@ impl CommandKind {
 }
 
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn format_status(
     effective: &str,
     requested: Mode,
@@ -62,14 +68,22 @@ pub fn format_status(
     override_steam: bool,
     connected: bool,
     combo: u32,
+    pad: PadIdentity,
+    battery: Option<(u8, bool)>,
 ) -> String {
-    format!(
-        "OK effective={effective} requested={} steam={} override={} connected={} combo={combo:x} daemon=1\n",
+    let mut line = format!(
+        "OK effective={effective} requested={} steam={} override={} connected={} combo={combo:x} pad={} daemon=1",
         requested.name(),
         u8::from(steam),
         u8::from(override_steam),
-        u8::from(connected)
-    )
+        u8::from(connected),
+        pad.name()
+    );
+    if let Some((pct, charging)) = battery {
+        let _ = write!(line, " battery={pct} charging={}", u8::from(charging));
+    }
+    line.push('\n');
+    line
 }
 
 pub fn open_listen_socket() -> Result<UnixListener, i32> {
@@ -219,9 +233,10 @@ pub fn cli(cmd: &str) -> i32 {
             Err(_) => {
                 let steam = steam::steam_is_running();
                 println!(
-                    "OK effective={} requested=unknown steam={} override=0 connected=0 combo=0 daemon=0",
+                    "OK effective={} requested=unknown steam={} override=0 connected=0 combo=0 pad={} daemon=0",
                     if steam { "steam" } else { "lizard" },
-                    u8::from(steam)
+                    u8::from(steam),
+                    crate::mode::load_pad_identity().name()
                 );
                 0
             }
@@ -247,7 +262,8 @@ pub fn cli(cmd: &str) -> i32 {
             }
             Err(_) => {
                 println!(
-                    "OK effective=lizard requested=lizard steam=0 override=0 connected=0 combo=0 daemon=0"
+                    "OK effective=lizard requested=lizard steam=0 override=0 connected=0 combo=0 pad={} daemon=0",
+                    crate::mode::load_pad_identity().name()
                 );
                 0
             }
@@ -279,13 +295,36 @@ mod tests {
 
     #[test]
     fn status_includes_connected() {
-        let line = format_status("gamepad", Mode::Gamepad, false, true, true, 0x11);
+        let line = format_status(
+            "gamepad",
+            Mode::Gamepad,
+            false,
+            true,
+            true,
+            0x11,
+            PadIdentity::Xbox,
+            None,
+        );
         assert!(line.contains("connected=1"));
         assert!(line.contains("override=1"));
         assert!(line.contains("combo=11"));
-        let line = format_status("lizard", Mode::Lizard, false, false, false, 0);
+        assert!(line.contains("pad=xbox"));
+        assert!(!line.contains("battery="));
+        let line = format_status(
+            "lizard",
+            Mode::Lizard,
+            false,
+            false,
+            false,
+            0,
+            PadIdentity::Steam,
+            Some((80, true)),
+        );
+        assert!(line.contains("pad=steam"));
         assert!(line.contains("connected=0"));
         assert!(line.contains("combo=0"));
+        assert!(line.contains("battery=80"));
+        assert!(line.contains("charging=1"));
     }
 
     #[test]
@@ -300,6 +339,11 @@ mod tests {
         assert_eq!(CommandKind::parse("combo-set zz"), CommandKind::Unknown);
         assert_eq!(CommandKind::parse("status"), CommandKind::Status);
         assert_eq!(CommandKind::parse("gamepad"), CommandKind::Gamepad);
+        assert_eq!(CommandKind::parse("gamepad-xbox"), CommandKind::GamepadXbox);
+        assert_eq!(
+            CommandKind::parse("gamepad-steam"),
+            CommandKind::GamepadSteam
+        );
         assert_eq!(CommandKind::parse("lizard"), CommandKind::Lizard);
         assert_eq!(CommandKind::parse("toggle"), CommandKind::Toggle);
         assert_eq!(CommandKind::parse("override-on"), CommandKind::OverrideOn);

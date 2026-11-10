@@ -46,6 +46,16 @@ pub const LIZARD_HEARTBEAT_STEAM_MS: u64 = 250;
 
 pub const ID_CONTROLLER_STATE: u8 = 0x42;
 pub const ID_BATTERY_STATUS: u8 = 0x43;
+pub const CHARGE_RESET: u8 = 0;
+pub const CHARGE_DISCHARGING: u8 = 1;
+pub const CHARGE_CHARGING: u8 = 2;
+pub const CHARGE_SRC_VALIDATE: u8 = 3;
+pub const CHARGE_DONE: u8 = 4;
+
+#[must_use]
+pub const fn battery_charging(state: u8) -> bool {
+    matches!(state, CHARGE_CHARGING | CHARGE_SRC_VALIDATE)
+}
 pub const ID_CONTROLLER_STATE_BLE: u8 = 0x45;
 pub const ID_WIRELESS_STATUS_X: u8 = 0x46;
 pub const ID_CONTROLLER_STATE_TIMESTAMP: u8 = 0x47;
@@ -155,6 +165,11 @@ mod tests {
         assert!(!is_bridge_target(0x045e, PID_PROTEUS_DONGLE, 2));
         assert!(!is_bridge_target(VALVE_VID, 0x1102, 2));
         assert!(!VERSION.is_empty());
+        assert!(!battery_charging(CHARGE_RESET));
+        assert!(!battery_charging(CHARGE_DISCHARGING));
+        assert!(battery_charging(CHARGE_CHARGING));
+        assert!(battery_charging(CHARGE_SRC_VALIDATE));
+        assert!(!battery_charging(CHARGE_DONE));
     }
 
     #[test]

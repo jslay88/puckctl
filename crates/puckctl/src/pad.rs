@@ -14,7 +14,8 @@ use puckctl_protocol::{
     BUTTON_MAP, ControllerState, EV_BTN_A, EV_BTN_B, EV_BTN_MODE, EV_BTN_SELECT, EV_BTN_START,
     EV_BTN_THUMBL, EV_BTN_THUMBR, EV_BTN_TL, EV_BTN_TR, EV_BTN_TRIGGER_HAPPY1,
     EV_BTN_TRIGGER_HAPPY2, EV_BTN_TRIGGER_HAPPY3, EV_BTN_TRIGGER_HAPPY4, EV_BTN_TRIGGER_HAPPY5,
-    EV_BTN_X, EV_BTN_Y, PID_PROTEUS_DONGLE, Report, VALVE_VID, WirelessStatus, classify,
+    EV_BTN_X, EV_BTN_Y, PID_PROTEUS_DONGLE, Report, VALVE_VID, WirelessStatus, battery_charging,
+    classify,
 };
 
 use crate::linux::{
@@ -22,28 +23,36 @@ use crate::linux::{
     EV_SYN, InputEvent, InputId, SYN_REPORT, UinputUserDev,
 };
 use crate::log::logln;
-use crate::mode::Mode;
+use crate::mode::{Mode, PadIdentity};
 use crate::slot::Slot;
 use crate::sys;
 use crate::uhid::UhidDevice;
 use crate::usb::{UsbDevice, open_rw_nonblock};
 
-const UINPUT_NAME: &[u8] = b"Steam Controller";
+const STEAM_UINPUT_NAME: &[u8] = b"Steam Controller";
+const XBOX_UINPUT_NAME: &[u8] = b"Microsoft X-Box 360 pad";
+const XBOX_VID: u16 = 0x045E;
+const XBOX_360_PID: u16 = 0x028E;
 
 #[derive(Debug)]
 pub struct VirtualPad {
     pub fd: File,
+    pub identity: PadIdentity,
 }
 
-fn steam_controller_uidev() -> UinputUserDev {
+fn pad_uidev(identity: PadIdentity) -> UinputUserDev {
+    let (name, vendor, product) = match identity {
+        PadIdentity::Xbox => (XBOX_UINPUT_NAME, XBOX_VID, XBOX_360_PID),
+        PadIdentity::Steam => (STEAM_UINPUT_NAME, VALVE_VID, PID_PROTEUS_DONGLE),
+    };
     let mut ud: UinputUserDev = unsafe { mem::zeroed() };
-    for (i, b) in UINPUT_NAME.iter().enumerate() {
+    for (i, b) in name.iter().enumerate() {
         ud.name[i] = *b as libc::c_char;
     }
     ud.id = InputId {
         bustype: BUS_USB,
-        vendor: VALVE_VID,
-        product: PID_PROTEUS_DONGLE,
+        vendor,
+        product,
         version: 0x0110,
     };
     ud.ff_effects_max = 0;
@@ -65,7 +74,7 @@ fn steam_controller_uidev() -> UinputUserDev {
     ud
 }
 
-pub fn create_uinput() -> io::Result<VirtualPad> {
+pub fn create_uinput(identity: PadIdentity) -> io::Result<VirtualPad> {
     if !crate::hw::allowed() {
         return Err(io::Error::other("uinput disabled in tests"));
     }
@@ -106,7 +115,7 @@ pub fn create_uinput() -> io::Result<VirtualPad> {
     ] {
         sys::ui_set_absbit(borrowed, i32::from(axis))?;
     }
-    let ud = steam_controller_uidev();
+    let ud = pad_uidev(identity);
 
     let wrote = unsafe {
         libc::write(
@@ -119,7 +128,7 @@ pub fn create_uinput() -> io::Result<VirtualPad> {
         logln("uinput device creation failed");
         return Err(io::Error::other("uinput device creation failed"));
     }
-    Ok(VirtualPad { fd })
+    Ok(VirtualPad { fd, identity })
 }
 
 pub fn destroy_pad(slot: &mut Slot) {
@@ -129,26 +138,38 @@ pub fn destroy_pad(slot: &mut Slot) {
     slot.uhid.take();
 }
 
-pub fn attach_override_devices(slot: &mut Slot) {
-    if !slot.connected || !slot.transport.is_usbfs() {
+pub fn attach_override_devices(slot: &mut Slot, identity: PadIdentity) {
+    if !slot.connected {
         return;
     }
-    if slot.uhid.is_none() {
+    if !identity.wants_uhid() {
+        slot.uhid.take();
+    } else if slot.transport.is_usbfs() && slot.uhid.is_none() {
         match UhidDevice::create(slot.iface) {
             Ok(dev) => slot.uhid = Some(dev),
             Err(_) => {}
         }
     }
-    // Prefer the hidraw clone for SDL gyro. uinput is only a fallback when
-    // /dev/uhid is missing, so the game does not pick an evdev pad with no IMU.
-    if slot.pad.is_none() && slot.uhid.is_none() {
-        match create_uinput() {
+    if slot
+        .pad
+        .as_ref()
+        .is_some_and(|pad| pad.identity != identity)
+    {
+        if let Some(pad) = slot.pad.take() {
+            let _ = sys::ui_dev_destroy(pad.fd.as_fd());
+        }
+    }
+    // Xbox: SDL2 GameController (2s2h, SoH). No IMU on that pad.
+    // Steam: Valve VID/PID evdev plus uhid hidraw clone for hidapi gyro.
+    if slot.pad.is_none() {
+        match create_uinput(identity) {
             Ok(pad) => {
                 slot.last_buttons = 0;
                 slot.last_abs = [0; 6];
                 slot.last_hat = [0; 2];
                 logln(format!(
-                    "virtual Steam Controller pad created for {}",
+                    "virtual {} pad created for {}",
+                    identity.name(),
                     slot.path
                 ));
                 slot.pad = Some(pad);
@@ -224,6 +245,7 @@ pub fn set_connected(
     slot: &mut Slot,
     connected: bool,
     requested: Mode,
+    identity: PadIdentity,
     paused: bool,
     dump: bool,
     usb: Option<&UsbDevice>,
@@ -240,7 +262,7 @@ pub fn set_connected(
         if !paused && requested == Mode::Gamepad {
             slot.send_lizard_off(usb);
             if !dump {
-                attach_override_devices(slot);
+                attach_override_devices(slot, identity);
             }
         } else if !paused && requested == Mode::Lizard {
             slot.send_lizard_on(usb);
@@ -248,6 +270,8 @@ pub fn set_connected(
     } else {
         logln(format!("controller disconnected on {}", slot.path));
         slot.last_buttons = 0;
+        slot.battery_pct = None;
+        slot.battery_charging = false;
         destroy_pad(slot);
     }
 }
@@ -267,6 +291,7 @@ pub fn ingest_report(
     slot: &mut Slot,
     data: &[u8],
     requested: Mode,
+    identity: PadIdentity,
     paused: bool,
     dump: bool,
     usb: Option<&UsbDevice>,
@@ -277,18 +302,26 @@ pub fn ingest_report(
     }
     match classify(data) {
         Some(Report::State(_)) => {
-            set_connected(slot, true, requested, paused, dump, usb);
+            set_connected(slot, true, requested, identity, paused, dump, usb);
             handle_state(slot, data);
         }
         Some(Report::Wireless(WirelessStatus::Connect)) => {
-            set_connected(slot, true, requested, paused, dump, usb);
+            set_connected(slot, true, requested, identity, paused, dump, usb);
         }
         Some(Report::Wireless(WirelessStatus::Disconnect)) => {
             if let Some(uhid) = &slot.uhid {
                 let _ = uhid.input(data);
             }
-            set_connected(slot, false, requested, paused, dump, usb);
+            set_connected(slot, false, requested, identity, paused, dump, usb);
             return;
+        }
+        Some(Report::Battery {
+            charge_state,
+            level_pct,
+        }) => {
+            set_connected(slot, true, requested, identity, paused, dump, usb);
+            slot.battery_pct = Some(level_pct);
+            slot.battery_charging = battery_charging(charge_state);
         }
         _ => {}
     }
@@ -358,13 +391,17 @@ mod tests {
 
     #[test]
     fn uidev_looks_like_steam_controller() {
-        let ud = steam_controller_uidev();
-        assert_eq!(ud.id.vendor, VALVE_VID);
-        assert_eq!(ud.id.product, PID_PROTEUS_DONGLE);
-        assert_eq!(ud.ff_effects_max, 0);
-        assert_eq!(ud.absmax[ABS_Z as usize], 255);
-        assert_eq!(ud.absmin[ABS_HAT0X as usize], -1);
-        assert!(create_uinput().is_err());
+        let xbox = pad_uidev(PadIdentity::Xbox);
+        assert_eq!(xbox.id.vendor, XBOX_VID);
+        assert_eq!(xbox.id.product, XBOX_360_PID);
+        assert_eq!(xbox.ff_effects_max, 0);
+        assert_eq!(xbox.absmax[ABS_Z as usize], 255);
+        assert_eq!(xbox.absmin[ABS_HAT0X as usize], -1);
+        let steam = pad_uidev(PadIdentity::Steam);
+        assert_eq!(steam.id.vendor, VALVE_VID);
+        assert_eq!(steam.id.product, PID_PROTEUS_DONGLE);
+        assert!(create_uinput(PadIdentity::Xbox).is_err());
+        assert!(create_uinput(PadIdentity::Steam).is_err());
     }
 
     #[test]
@@ -377,16 +414,50 @@ mod tests {
                 ep_out: 0x02,
             },
         );
-        set_connected(&mut slot, true, Mode::Gamepad, false, false, None);
+        set_connected(
+            &mut slot,
+            true,
+            Mode::Gamepad,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
         assert!(slot.connected);
         assert!(slot.pad.is_none());
         assert!(slot.uhid.is_none());
-        attach_override_devices(&mut slot);
+        attach_override_devices(&mut slot, PadIdentity::Xbox);
         assert!(slot.uhid.is_none());
         assert!(slot.pad.is_none());
-        set_connected(&mut slot, true, Mode::Gamepad, false, false, None);
-        set_connected(&mut slot, false, Mode::Lizard, false, false, None);
-        set_connected(&mut slot, true, Mode::Lizard, false, false, None);
+        attach_override_devices(&mut slot, PadIdentity::Steam);
+        assert!(slot.uhid.is_none());
+        set_connected(
+            &mut slot,
+            true,
+            Mode::Gamepad,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
+        set_connected(
+            &mut slot,
+            false,
+            Mode::Lizard,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
+        set_connected(
+            &mut slot,
+            true,
+            Mode::Lizard,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
         assert!(slot.connected);
     }
 
@@ -397,6 +468,7 @@ mod tests {
             &mut slot,
             &state_bytes(BTN_A),
             Mode::Gamepad,
+            PadIdentity::Xbox,
             false,
             false,
             None,
@@ -407,6 +479,7 @@ mod tests {
             &mut slot,
             &state_bytes(BTN_A),
             Mode::Gamepad,
+            PadIdentity::Xbox,
             false,
             false,
             None,
@@ -415,6 +488,7 @@ mod tests {
             &mut slot,
             &[ID_WIRELESS_STATUS, WIRELESS_DISCONNECT],
             Mode::Gamepad,
+            PadIdentity::Xbox,
             false,
             false,
             None,
@@ -424,17 +498,49 @@ mod tests {
             &mut slot,
             &[ID_WIRELESS_STATUS, WIRELESS_CONNECT],
             Mode::Lizard,
+            PadIdentity::Xbox,
             false,
             false,
             None,
         );
         assert!(slot.connected);
-        ingest_report(&mut slot, &[0xff], Mode::Gamepad, false, false, None);
+        ingest_report(
+            &mut slot,
+            &[ID_BATTERY_STATUS, 2, 80],
+            Mode::Lizard,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
+        assert_eq!(slot.battery_pct, Some(80));
+        assert!(slot.battery_charging);
+        ingest_report(
+            &mut slot,
+            &[ID_WIRELESS_STATUS, WIRELESS_DISCONNECT],
+            Mode::Lizard,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
+        assert!(slot.battery_pct.is_none());
+        assert!(!slot.battery_charging);
+        ingest_report(
+            &mut slot,
+            &[0xff],
+            Mode::Gamepad,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
         let mut dump = hid_slot();
         ingest_report(
             &mut dump,
             &state_bytes(BTN_B),
             Mode::Gamepad,
+            PadIdentity::Xbox,
             false,
             true,
             None,
@@ -450,7 +556,10 @@ mod tests {
     fn emit_writes_evdev_events() {
         let (mut r, w) = crate::test_env::nonblock_pipe();
         let mut slot = hid_slot();
-        slot.pad = Some(VirtualPad { fd: w });
+        slot.pad = Some(VirtualPad {
+            fd: w,
+            identity: PadIdentity::Xbox,
+        });
         let mut state = ControllerState {
             buttons: BTN_A,
             left_stick: (10, -20),
@@ -472,8 +581,24 @@ mod tests {
         let mut buf = [0_u8; 512];
         let n = r.read(&mut buf).unwrap_or(0);
         assert!(n >= mem::size_of::<InputEvent>());
-        set_connected(&mut slot, true, Mode::Gamepad, false, false, None);
-        set_connected(&mut slot, false, Mode::Gamepad, false, false, None);
+        set_connected(
+            &mut slot,
+            true,
+            Mode::Gamepad,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
+        set_connected(
+            &mut slot,
+            false,
+            Mode::Gamepad,
+            PadIdentity::Xbox,
+            false,
+            false,
+            None,
+        );
         assert!(slot.pad.is_none());
     }
 }

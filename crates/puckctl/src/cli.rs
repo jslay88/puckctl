@@ -14,7 +14,10 @@ With no command it runs the daemon (gamepad mode). Steam running
 takes the device unless override is on.
 
 commands:
-  gamepad            disable lizard mode, expose a virtual pad
+  gamepad [xbox|steam]
+                     disable lizard mode, expose a virtual pad
+                     xbox = SDL2 GameController (no gyro)
+                     steam = Valve pad + hidraw gyro
   lizard             restore firmware keyboard/mouse
   toggle             flip between gamepad and lizard
   override on|off|toggle
@@ -81,6 +84,15 @@ where
         };
     }
 
+    if cmd == "gamepad" {
+        return match arg.as_deref() {
+            None => Action::Client("gamepad".into()),
+            Some("xbox") => Action::Client("gamepad-xbox".into()),
+            Some("steam") => Action::Client("gamepad-steam".into()),
+            _ => Action::BadUsage,
+        };
+    }
+
     if cmd == "combo" {
         return match arg.as_deref() {
             None => Action::Client("combo".into()),
@@ -100,8 +112,8 @@ where
     }
 
     match cmd.as_str() {
-        "gamepad" | "lizard" | "toggle" | "status" | "quit" | "buttons" | "override-on"
-        | "override-off" | "override-toggle" => Action::Client(cmd),
+        "gamepad" | "gamepad-xbox" | "gamepad-steam" | "lizard" | "toggle" | "status" | "quit"
+        | "buttons" | "override-on" | "override-off" | "override-toggle" => Action::Client(cmd),
         _ => Action::BadUsage,
     }
 }
@@ -170,6 +182,15 @@ mod tests {
     fn parses_client_commands() {
         assert_eq!(parse_args(["status"]), Action::Client("status".into()));
         assert_eq!(parse_args(["gamepad"]), Action::Client("gamepad".into()));
+        assert_eq!(
+            parse_args(["gamepad", "xbox"]),
+            Action::Client("gamepad-xbox".into())
+        );
+        assert_eq!(
+            parse_args(["gamepad", "steam"]),
+            Action::Client("gamepad-steam".into())
+        );
+        assert_eq!(parse_args(["gamepad", "maybe"]), Action::BadUsage);
         assert_eq!(parse_args(["lizard"]), Action::Client("lizard".into()));
         assert_eq!(parse_args(["toggle"]), Action::Client("toggle".into()));
         assert_eq!(parse_args(["buttons"]), Action::Client("buttons".into()));
@@ -213,6 +234,7 @@ mod tests {
         usage(&mut buf).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("combo"));
+        assert!(text.contains("gamepad [xbox|steam]"));
         assert!(text.contains("--dump"));
     }
 

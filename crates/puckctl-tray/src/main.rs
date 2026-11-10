@@ -12,6 +12,7 @@ use puckctl_protocol::{VERSION, format_buttons};
 const APP_TITLE: &str = "puckctl";
 const DAEMON_UNIT: &str = "puckctl.service";
 const TRAY_UNIT: &str = "puckctl-tray.service";
+const LOW_BATTERY_PCT: u8 = 10;
 
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -21,7 +22,10 @@ struct Status {
     steam: bool,
     override_steam: bool,
     connected: bool,
+    battery_pct: Option<u8>,
+    charging: bool,
     combo: u32,
+    pad: String,
     daemon: bool,
 }
 
@@ -33,7 +37,10 @@ impl Default for Status {
             steam: false,
             override_steam: false,
             connected: false,
+            battery_pct: None,
+            charging: false,
             combo: 0,
+            pad: "xbox".into(),
             daemon: false,
         }
     }
@@ -49,7 +56,10 @@ fn parse_status(text: &str) -> Status {
                 "steam" => status.steam = value == "1",
                 "override" => status.override_steam = value == "1",
                 "connected" => status.connected = value == "1",
+                "battery" => status.battery_pct = value.parse().ok(),
+                "charging" => status.charging = value == "1",
                 "combo" => status.combo = u32::from_str_radix(value, 16).unwrap_or(0),
+                "pad" => status.pad = value.to_string(),
                 "daemon" => status.daemon = value == "1",
                 _ => {}
             }
@@ -156,21 +166,29 @@ impl PuckTray {
         if self.yielded() {
             "Steam has the controller".into()
         } else if self.status.effective == "gamepad" {
-            if self.status.steam {
-                "Gamepad (Steam override)".into()
+            let pad = if self.status.pad == "steam" {
+                "Steam Controller"
             } else {
-                "Gamepad".into()
+                "Xbox"
+            };
+            if self.status.steam {
+                format!("Gamepad ({pad}, Steam override)")
+            } else {
+                format!("Gamepad ({pad})")
             }
         } else {
             "Desktop (lizard)".into()
         }
     }
 
-    fn connection_label(&self) -> &'static str {
-        if self.yielded() || self.status.connected {
-            "Connected"
-        } else {
-            "Disconnected"
+    fn connection_label(&self) -> String {
+        if !(self.yielded() || self.status.connected) {
+            return "Disconnected".into();
+        }
+        match self.status.battery_pct {
+            Some(pct) if self.status.charging => format!("Connected — Charging {pct}%"),
+            Some(pct) => format!("Connected — {pct}%"),
+            None => "Connected".into(),
         }
     }
 
@@ -185,12 +203,19 @@ impl PuckTray {
     }
 
     fn icon_tone(&self) -> icons::Tone {
-        if self.yielded() {
-            icons::Tone::Steam
-        } else if self.status.connected {
-            icons::Tone::Color
-        } else {
+        let live = self.yielded() || self.status.connected;
+        if !live {
             icons::Tone::Dim
+        } else if self
+            .status
+            .battery_pct
+            .is_some_and(|pct| pct < LOW_BATTERY_PCT)
+        {
+            icons::Tone::Low
+        } else if self.yielded() {
+            icons::Tone::Steam
+        } else {
+            icons::Tone::Color
         }
     }
 
@@ -220,9 +245,30 @@ fn open_combo_window() {
 }
 
 fn select_mode(tray: &mut PuckTray, index: usize) {
-    let cmd = if index == 0 { "gamepad" } else { "lizard" };
-    let _ = run_puckctl(&[cmd]);
+    match index {
+        0 => {
+            let _ = run_puckctl(&["gamepad", "xbox"]);
+        }
+        1 => {
+            let _ = run_puckctl(&["gamepad", "steam"]);
+        }
+        _ => {
+            let _ = run_puckctl(&["lizard"]);
+        }
+    }
     tray.refresh();
+}
+
+fn mode_radio_index(status: &Status, yielded: bool) -> usize {
+    let gamepad = if yielded {
+        status.requested == "gamepad"
+    } else {
+        status.effective == "gamepad"
+    };
+    if !gamepad {
+        return 2;
+    }
+    usize::from(status.pad == "steam")
 }
 
 fn toggle_override(tray: &mut PuckTray) {
@@ -315,11 +361,7 @@ impl Tray for PuckTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let yielded = self.yielded();
-        let selected = if yielded {
-            usize::from(self.status.requested != "gamepad")
-        } else {
-            usize::from(self.status.effective != "gamepad")
-        };
+        let selected = mode_radio_index(&self.status, yielded);
         vec![
             StandardItem {
                 label: format!("{APP_TITLE} {VERSION}"),
@@ -328,7 +370,7 @@ impl Tray for PuckTray {
             }
             .into(),
             StandardItem {
-                label: self.connection_label().into(),
+                label: self.connection_label(),
                 enabled: false,
                 ..Default::default()
             }
@@ -339,7 +381,12 @@ impl Tray for PuckTray {
                 select: Box::new(|this: &mut Self, index| select_mode(this, index)),
                 options: vec![
                     RadioItem {
-                        label: "Gamepad".into(),
+                        label: "Gamepad (Xbox)".into(),
+                        enabled: !yielded,
+                        ..Default::default()
+                    },
+                    RadioItem {
+                        label: "Gamepad (Steam Controller)".into(),
                         enabled: !yielded,
                         ..Default::default()
                     },
@@ -434,17 +481,22 @@ mod tests {
     #[test]
     fn parse_connected_flag() {
         let s = parse_status(
-            "OK effective=lizard requested=lizard steam=0 override=1 connected=1 combo=11 daemon=1",
+            "OK effective=lizard requested=lizard steam=0 override=1 connected=1 combo=11 daemon=1 battery=80 charging=1",
         );
         assert!(s.connected);
         assert_eq!(s.effective, "lizard");
         assert_eq!(s.combo, 0x11);
+        assert_eq!(s.battery_pct, Some(80));
+        assert!(s.charging);
         assert!(s.override_steam);
         assert!(s.daemon);
-        let s = parse_status("OK effective=gamepad requested=gamepad connected=0 daemon=1 extra=1");
+        let s = parse_status(
+            "OK effective=gamepad requested=gamepad connected=0 pad=steam daemon=1 extra=1",
+        );
         assert!(!s.connected);
         assert_eq!(s.combo, 0);
         assert_eq!(s.effective, "gamepad");
+        assert_eq!(s.pad, "steam");
         let d = Status::default();
         assert_eq!(d.effective, "lizard");
         assert!(!d.daemon);
@@ -455,33 +507,69 @@ mod tests {
         let gamepad = Status {
             effective: "gamepad".into(),
             connected: true,
+            battery_pct: Some(80),
             combo: puckctl_protocol::BTN_A | puckctl_protocol::BTN_STEAM,
             ..Default::default()
         };
         let t = tray(gamepad.clone());
         assert!(!t.yielded());
         assert_eq!(t.icon_kind(), icons::Kind::Gamepad);
-        assert_eq!(t.label(), "Gamepad");
-        assert_eq!(t.connection_label(), "Connected");
-        assert_eq!(t.tooltip_text(), "Gamepad — Connected");
+        assert_eq!(t.label(), "Gamepad (Xbox)");
+        assert_eq!(t.connection_label(), "Connected — 80%");
+        assert_eq!(t.tooltip_text(), "Gamepad (Xbox) — Connected — 80%");
         assert_eq!(t.icon_tone(), icons::Tone::Color);
         assert!(t.combo_label().contains('A'));
 
         let t = tray(Status {
+            charging: true,
+            battery_pct: Some(80),
+            ..gamepad.clone()
+        });
+        assert_eq!(t.connection_label(), "Connected — Charging 80%");
+
+        let t = tray(Status {
+            battery_pct: Some(9),
+            ..gamepad.clone()
+        });
+        assert_eq!(t.icon_tone(), icons::Tone::Low);
+        assert_eq!(t.connection_label(), "Connected — 9%");
+
+        let t = tray(Status {
+            battery_pct: Some(10),
+            ..gamepad.clone()
+        });
+        assert_eq!(t.icon_tone(), icons::Tone::Color);
+
+        let t = tray(Status {
             steam: true,
             override_steam: true,
+            ..gamepad.clone()
+        });
+        assert_eq!(t.label(), "Gamepad (Xbox, Steam override)");
+
+        let t = tray(Status {
+            pad: "steam".into(),
             ..gamepad
         });
-        assert_eq!(t.label(), "Gamepad (Steam override)");
+        assert_eq!(t.label(), "Gamepad (Steam Controller)");
+
+        let t = tray(Status {
+            steam: true,
+            effective: "gamepad".into(),
+            battery_pct: Some(8),
+            ..Default::default()
+        });
+        assert!(t.yielded());
+        assert_eq!(t.icon_kind(), icons::Kind::Gamepad);
+        assert_eq!(t.label(), "Steam has the controller");
+        assert_eq!(t.connection_label(), "Connected — 8%");
+        assert_eq!(t.icon_tone(), icons::Tone::Low);
 
         let t = tray(Status {
             steam: true,
             effective: "gamepad".into(),
             ..Default::default()
         });
-        assert!(t.yielded());
-        assert_eq!(t.icon_kind(), icons::Kind::Gamepad);
-        assert_eq!(t.label(), "Steam has the controller");
         assert_eq!(t.connection_label(), "Connected");
         assert_eq!(t.tooltip_text(), "Steam has the controller — Connected");
         assert_eq!(t.icon_tone(), icons::Tone::Steam);
@@ -508,6 +596,7 @@ mod tests {
         let tip = t.tool_tip();
         assert!(tip.description.contains("Gamepad"));
         assert_eq!(t.menu().len(), 12);
+        assert_eq!(mode_radio_index(&t.status, false), 0);
 
         let t = tray(Status {
             steam: true,
@@ -515,6 +604,13 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(t.menu().len(), 12);
+        assert_eq!(mode_radio_index(&t.status, true), 2);
+        let steam_pad = Status {
+            effective: "gamepad".into(),
+            pad: "steam".into(),
+            ..Default::default()
+        };
+        assert_eq!(mode_radio_index(&steam_pad, false), 1);
     }
 
     #[test]
@@ -526,6 +622,7 @@ mod tests {
             t.activate(0, 0);
             select_mode(&mut t, 0);
             select_mode(&mut t, 1);
+            select_mode(&mut t, 2);
             toggle_override(&mut t);
             request_exit(&mut t);
             assert!(t.exit);

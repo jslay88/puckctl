@@ -7,12 +7,18 @@ enum Style {
     Color,
     Steam,
     Dim,
+    Low,
 }
 
 /// Steam client accent (`#66C0F4`).
 const STEAM_R: u16 = 0x66;
 const STEAM_G: u16 = 0xC0;
 const STEAM_B: u16 = 0xF4;
+
+/// Battery below 10% (`#E53935`).
+const LOW_R: u16 = 0xE5;
+const LOW_G: u16 = 0x39;
+const LOW_B: u16 = 0x35;
 
 fn load_png(bytes: &[u8], style: Style) -> ksni::Icon {
     let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
@@ -36,6 +42,12 @@ fn load_png(bytes: &[u8], style: Style) -> ksni::Icon {
                 pixel[2] = grey;
                 pixel[3] = u8::try_from((u16::from(pixel[3]) * 6) / 10).unwrap_or(0);
             }
+            Style::Low => {
+                let luma = (u16::from(pixel[0]) + u16::from(pixel[1]) + u16::from(pixel[2])) / 3;
+                pixel[0] = u8::try_from((luma * LOW_R) / 255).unwrap_or(0);
+                pixel[1] = u8::try_from((luma * LOW_G) / 255).unwrap_or(0);
+                pixel[2] = u8::try_from((luma * LOW_B) / 255).unwrap_or(0);
+            }
         }
         pixel.rotate_right(1);
     }
@@ -57,11 +69,15 @@ static GAMEPAD_STEAM: LazyLock<ksni::Icon> =
     png!(include_bytes!("../assets/gamepad.png"), Style::Steam);
 static GAMEPAD_DIM: LazyLock<ksni::Icon> =
     png!(include_bytes!("../assets/gamepad.png"), Style::Dim);
+static GAMEPAD_LOW: LazyLock<ksni::Icon> =
+    png!(include_bytes!("../assets/gamepad.png"), Style::Low);
 static DESKTOP: LazyLock<ksni::Icon> = png!(include_bytes!("../assets/desktop.png"), Style::Color);
 static DESKTOP_STEAM: LazyLock<ksni::Icon> =
     png!(include_bytes!("../assets/desktop.png"), Style::Steam);
 static DESKTOP_DIM: LazyLock<ksni::Icon> =
     png!(include_bytes!("../assets/desktop.png"), Style::Dim);
+static DESKTOP_LOW: LazyLock<ksni::Icon> =
+    png!(include_bytes!("../assets/desktop.png"), Style::Low);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -74,6 +90,7 @@ pub enum Tone {
     Color,
     Steam,
     Dim,
+    Low,
 }
 
 #[must_use]
@@ -82,9 +99,11 @@ pub fn icon(kind: Kind, tone: Tone) -> ksni::Icon {
         (Kind::Gamepad, Tone::Color) => GAMEPAD.clone(),
         (Kind::Gamepad, Tone::Steam) => GAMEPAD_STEAM.clone(),
         (Kind::Gamepad, Tone::Dim) => GAMEPAD_DIM.clone(),
+        (Kind::Gamepad, Tone::Low) => GAMEPAD_LOW.clone(),
         (Kind::Desktop, Tone::Color) => DESKTOP.clone(),
         (Kind::Desktop, Tone::Steam) => DESKTOP_STEAM.clone(),
         (Kind::Desktop, Tone::Dim) => DESKTOP_DIM.clone(),
+        (Kind::Desktop, Tone::Low) => DESKTOP_LOW.clone(),
     }
 }
 
@@ -95,7 +114,7 @@ mod tests {
     #[test]
     fn all_kinds_have_pixels() {
         for kind in [Kind::Gamepad, Kind::Desktop] {
-            for tone in [Tone::Color, Tone::Steam, Tone::Dim] {
+            for tone in [Tone::Color, Tone::Steam, Tone::Dim, Tone::Low] {
                 let icon = icon(kind, tone);
                 assert!(icon.width > 0);
                 assert!(icon.height > 0);

@@ -67,6 +67,11 @@ pub fn combo_file() -> PathBuf {
 }
 
 #[must_use]
+pub fn pad_file() -> PathBuf {
+    state_dir().join("pad")
+}
+
+#[must_use]
 pub fn cfgbak_dir() -> PathBuf {
     state_dir().join("cfgbak")
 }
@@ -124,6 +129,7 @@ mod tests {
             assert!(mode_file().ends_with("mode"));
             assert!(override_file().ends_with("override"));
             assert!(combo_file().ends_with("combo"));
+            assert!(pad_file().ends_with("pad"));
             assert!(cfgbak_dir().ends_with("cfgbak"));
             assert!(read_trimmed(&mode_file()).is_none());
             write_text(&mode_file(), "  lizard  \n");

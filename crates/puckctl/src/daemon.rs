@@ -5,7 +5,7 @@ use crate::combo;
 use crate::control::{self, CommandKind};
 use crate::grab;
 use crate::log::logln;
-use crate::mode::{self, Mode};
+use crate::mode::{self, Mode, PadIdentity};
 use crate::pad;
 use crate::scan;
 use crate::slot::Slot;
@@ -17,6 +17,7 @@ pub struct Daemon {
     pub usb: Option<UsbDevice>,
     pub grabs: Vec<File>,
     pub requested: Mode,
+    pub pad_identity: PadIdentity,
     pub override_steam: bool,
     pub paused: bool,
     pub steam_seen: bool,
@@ -35,8 +36,10 @@ impl Daemon {
     pub fn new(dump: bool, steam_check: bool) -> Self {
         let mut override_steam = false;
         let mut requested = Mode::Gamepad;
+        let mut pad_identity = PadIdentity::Xbox;
         if !dump {
             requested = mode::load_requested_mode();
+            pad_identity = mode::load_pad_identity();
             override_steam = steam::load_override();
             if !steam_check {
                 override_steam = true;
@@ -47,6 +50,7 @@ impl Daemon {
             usb: None,
             grabs: Vec::new(),
             requested,
+            pad_identity,
             override_steam,
             paused: false,
             steam_seen: false,
@@ -83,6 +87,15 @@ impl Daemon {
         self.slots.iter().any(|slot| slot.connected)
     }
 
+    fn battery_status(&self) -> Option<(u8, bool)> {
+        if !self.any_connected() {
+            return None;
+        }
+        self.slots
+            .iter()
+            .find_map(|slot| slot.battery_pct.map(|pct| (pct, slot.battery_charging)))
+    }
+
     fn status_line(&self) -> String {
         control::format_status(
             self.effective_name(),
@@ -91,6 +104,8 @@ impl Daemon {
             self.override_steam,
             self.any_connected(),
             self.combo,
+            self.pad_identity,
+            self.battery_status(),
         )
     }
 
@@ -177,11 +192,15 @@ impl Daemon {
             return;
         }
         self.retake_from_steam();
+        if self.slots.is_empty() && crate::hw::allowed() {
+            self.slots = scan::scan_devices(self.override_steam, self.requested, &mut self.usb);
+        }
         if self.requested == Mode::Gamepad {
             self.lizard_all(false);
             grab::grab_lizard_inputs(&mut self.grabs);
+            let identity = self.pad_identity;
             for slot in &mut self.slots {
-                pad::attach_override_devices(slot);
+                pad::attach_override_devices(slot, identity);
             }
             logln("mode: gamepad");
         } else {
@@ -213,6 +232,18 @@ impl Daemon {
         self.requested = next;
         mode::save_requested_mode(next);
         self.apply_requested_mode();
+    }
+
+    fn set_pad_identity(&mut self, identity: PadIdentity) {
+        if self.pad_identity != identity {
+            self.pad_identity = identity;
+            mode::save_pad_identity(identity);
+            for slot in &mut self.slots {
+                pad::destroy_pad(slot);
+            }
+            logln(format!("pad identity: {}", identity.name()));
+        }
+        self.set_requested(Mode::Gamepad);
     }
 
     fn set_override(&mut self, on: bool) {
@@ -252,6 +283,14 @@ impl Daemon {
             CommandKind::Status => self.status_line(),
             CommandKind::Gamepad => {
                 self.set_requested(Mode::Gamepad);
+                self.status_line()
+            }
+            CommandKind::GamepadXbox => {
+                self.set_pad_identity(PadIdentity::Xbox);
+                self.status_line()
+            }
+            CommandKind::GamepadSteam => {
+                self.set_pad_identity(PadIdentity::Steam);
                 self.status_line()
             }
             CommandKind::Lizard => {
@@ -374,6 +413,16 @@ mod tests {
                     .contains("combo=")
             );
             assert_eq!(d.combo, combo);
+            assert!(
+                d.handle_command(CommandKind::GamepadSteam)
+                    .contains("pad=steam")
+            );
+            assert_eq!(d.pad_identity, PadIdentity::Steam);
+            assert!(
+                d.handle_command(CommandKind::GamepadXbox)
+                    .contains("pad=xbox")
+            );
+            assert_eq!(d.pad_identity, PadIdentity::Xbox);
             assert!(d.handle_command(CommandKind::Unknown).starts_with("ERR"));
             assert_eq!(d.handle_command(CommandKind::Quit), "OK quitting\n");
             assert!(!d.running);
@@ -436,6 +485,9 @@ mod tests {
             let (r, _w) = crate::test_env::nonblock_pipe();
             d.slots.push(Slot::new("h".into(), 2, Transport::Hidraw(r)));
             d.slots[0].connected = true;
+            d.slots[0].battery_pct = Some(12);
+            assert_eq!(d.battery_status(), Some((12, false)));
+            assert!(d.status_line().contains("battery=12"));
             d.steam_tick();
             // Tests never touch live USB. Live daemon kicks hid when Steam appears.
             assert_eq!(d.slots.len(), 1);
@@ -483,6 +535,7 @@ mod tests {
             d.close_all();
             let _ = d.any_connected();
             let _ = d.current_buttons();
+            let _ = d.battery_status();
             let _ = d.status_line();
         });
     }

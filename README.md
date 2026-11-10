@@ -15,7 +15,8 @@ This is a new Rust project. It is not a fork of
   desktop mode (keyboard and mouse)
 - A tray icon to switch modes, set a button combo back to desktop, and
   optionally keep control while Steam is running
-- Saved mode, Steam override, and combo across restarts
+- Saved mode, pad identity (Xbox or Steam Controller), Steam override,
+  and combo across restarts
 
 Daily hardware is the Proteus dongle (`28de:1304`). Other Triton Pucks should
 work and are not what we test every day. See [docs/install.md](docs/install.md).
@@ -51,14 +52,16 @@ make enable-tray
 ## Tray
 
 The icon follows the current mode (gamepad, desktop, or Steam). Click it to
-toggle gamepad and desktop. The menu sets mode, Steam override, start on
-login, and the desktop combo (hold at least two buttons for five seconds).
+toggle gamepad and desktop. The menu sets mode (Xbox pad, Steam Controller pad, or desktop), Steam
+override, start on login, and the desktop combo (hold at least two
+buttons for five seconds). Xbox has no gyro. Steam identity keeps the
+hidraw clone so hidapi gyro still works.
 
 With Override Steam on, gamepad mode claims the USB device so Steam
 cannot keep desktop mapping (touchpad mouse, trigger click). Steam will
 usually say the Steam Controller disconnected. Expected. The tray stays
-the yellow gamepad icon. Gyro still works: reports are cloned onto a
-virtual hidraw while USB stays claimed.
+the yellow gamepad icon. Gyro still works in Steam Controller identity: reports are cloned onto a
+virtual hidraw while USB stays claimed. Xbox identity is a plain 360 pad.
 
 CLI and Steam behavior: [docs/cli.md](docs/cli.md), [docs/steam.md](docs/steam.md).
 
